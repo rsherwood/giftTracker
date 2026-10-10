@@ -689,8 +689,11 @@
       spent: t.spent + p.spent_cents,
       // Ideas aren't committed to yet, so only gifts at Buy or later count.
       chosen: t.chosen + p.gift_count - p.n_idea,
+      // Each count includes gifts that have gone further, e.g. wrapped gifts were also purchased.
+      purchased: t.purchased + p.n_purchased + p.n_received + p.n_wrapped,
+      received: t.received + p.n_received + p.n_wrapped,
       wrapped: t.wrapped + p.n_wrapped,
-    }), { budget: 0, spent: 0, chosen: 0, wrapped: 0 });
+    }), { budget: 0, spent: 0, chosen: 0, purchased: 0, received: 0, wrapped: 0 });
 
     await refreshBilling();
     const addPerson = () => (atFreeLimit()
@@ -736,10 +739,12 @@
         people.length ? h('button', { class: 'btn', type: 'button', onclick: addPerson }, '+ Add person') : null,
       ),
       people.length
-        ? h('div', { class: 'stats' },
+        ? h('div', { class: 'stats stats-6' },
           stat('People', people.length),
           stat('Total budget', money(totals.budget)),
           stat('Spent', money(totals.spent)),
+          stat('Purchased', `${totals.purchased} / ${totals.chosen}`),
+          stat('Received', `${totals.received} / ${totals.chosen}`),
           stat('Wrapped', `${totals.wrapped} / ${totals.chosen}`))
         : null,
       content,

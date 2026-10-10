@@ -161,6 +161,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 28px; }
 @media (max-width: 720px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Home page: six figures in one row on wide screens, three per row on tablets. */
+.stats-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 1000px) { .stats-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .stats-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .stat { padding: 14px 16px; }
 .stat-label { color: var(--muted); font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 .stat-value { font-size: 1.45rem; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
