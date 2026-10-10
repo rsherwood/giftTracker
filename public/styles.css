@@ -352,3 +352,22 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .stepper button:disabled:hover { background: none; color: var(--muted); }
 .stepper .current button:disabled:hover { color: var(--text); }
 .locked-chip { margin-left: 8px; padding: 1px 8px; font-size: 0.75rem; }
+
+/* ---------- Legal pages & footer ---------- */
+.site-footer {
+  max-width: 1120px; margin: 0 auto; padding: 0 16px 32px;
+  color: var(--muted); font-size: 0.85rem; text-align: center;
+}
+.site-footer a { color: inherit; }
+.fine-print { margin: 0; color: var(--muted); font-size: 0.85rem; text-align: center; }
+.upgrade-pitch .fine-print { text-align: left; }
+.danger-zone { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+.danger-zone .btn { justify-self: start; }
+
+.legal { max-width: 760px; line-height: 1.65; }
+.legal h1 { margin-bottom: 4px; }
+.legal h2 { margin: 32px 0 8px; font-size: 1.15rem; }
+.legal .updated { color: var(--muted); margin-top: 0; }
+.legal ul { padding-left: 22px; }
+.legal li { margin: 6px 0; }
+.legal code { background: var(--surface-2); padding: 1px 6px; border-radius: 6px; }

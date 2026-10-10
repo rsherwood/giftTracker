@@ -27,7 +27,10 @@ and price) per person. Each gift is tracked through:
   the user added stay fully editable, and everyone else becomes read-only
   (viewable and deletable, but their details and gifts can't be changed)
   until they renew.
-- **Password reset** by email.
+- **Password reset** by email, and **account deletion** from the account page.
+- **Terms of Service** (`/terms`) and **Privacy Policy** (`/privacy`), with the
+  company details, price and contact email filled in automatically. Edit them
+  in `src/legal/`.
 - **Currency** per user (USD, GBP, EUR, CAD, AUD, NZD, JPY, INR).
 - Responsive layout with light and dark themes.
 
@@ -58,6 +61,7 @@ Configuration (environment variables):
 | `STRIPE_PRICE_ID`      | unset                     | The yearly Premium price (`price_…`)                |
 | `STRIPE_WEBHOOK_SECRET`| unset                     | Signing secret of the webhook endpoint (`whsec_…`)  |
 | `PRICE_LABEL`          | `£5/year`                 | Price shown in the app                              |
+| `CONTACT_EMAIL`        | `MAIL_FROM`, else `hello@firstwebdev.co.uk` | Contact address shown in the Terms and Privacy Policy |
 | `PREMIUM_EMAILS`       | unset                     | Comma-separated emails that get Premium free (e.g. yours) |
 
 Product photo lookup makes outbound HTTP requests from the server. It refuses
@@ -137,6 +141,7 @@ src/app.js      Express app: auth, people, gifts and image API routes
 src/auth.js     Password hashing, sessions, rate limiting
 src/billing.js  Free/Premium plans, Stripe Checkout, portal and webhooks
 src/mailer.js   Outgoing email (password resets)
+src/legal/      Terms of Service and Privacy Policy text
 src/db.js       SQLite schema
 src/images.js   Generated SVG artwork + product photo lookup
 public/         Single-page front end (vanilla JS, no build step)

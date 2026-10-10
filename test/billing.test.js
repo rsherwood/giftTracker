@@ -43,6 +43,7 @@ before(async () => {
     fetchRemoteImages: false,
     authAttemptLimit: 1000,
     appUrl: 'https://gifts.example.test',
+    contactEmail: 'help@example.test',
     sendMail: async (message) => { mail.push(message); },
     billing: {
       stripe: fakeStripe,
@@ -318,4 +319,48 @@ test('renewals and failed renewal payments are picked up from invoice events', a
   subscriptions.set(subId, subscription(subId, customer, 'active'));
   await sendWebhook({ id: 'evt_i5', type: 'invoice.paid', data: { object: { object: 'invoice', customer, subscription: subId } } });
   assert.equal((await call('GET', '/api/billing')).data.billing.premium, true);
+});
+
+test('terms and privacy pages are served with the site details filled in', async () => {
+  for (const [path, heading] of [['/terms', 'Terms of Service'], ['/privacy', 'Privacy Policy']]) {
+    const res = await fetch(base + path);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /text\/html/);
+    const html = await res.text();
+    assert.match(html, new RegExp(`<h1>${heading}</h1>`));
+    assert.match(html, /mailto:help@example\.test/);
+    assert.match(html, /13708714/);
+    assert.doesNotMatch(html, /\{\{/);
+  }
+  const terms = await (await fetch(`${base}/terms`)).text();
+  assert.match(terms, /£5\/year/);
+  assert.match(terms, /up to 2 people/);
+});
+
+test('deleting an account', async () => {
+  const { call, user } = await newUser('leaving@example.com');
+  const { data: { person } } = await call('POST', '/api/people', { name: 'Mum' });
+  await call('POST', `/api/people/${person.id}/gifts`, { name: 'Scarf' });
+
+  assert.equal((await call('DELETE', '/api/auth/me', { password: 'wrong-password' })).status, 401);
+
+  // An active subscription has to be cancelled first so it can't keep charging.
+  const subId = `sub_${user.id}`;
+  await call('POST', '/api/billing/checkout');
+  subscriptions.set(subId, subscription(subId, `cus_${user.id}`, 'active'));
+  await sendWebhook({ id: 'evt_d1', type: 'customer.subscription.updated', data: { object: subscriptions.get(subId) } });
+  let res = await call('DELETE', '/api/auth/me', { password: 'password123' });
+  assert.equal(res.status, 409);
+  assert.equal(res.data.code, 'cancel_subscription_first');
+
+  // Once it's set to end, the account can go.
+  subscriptions.set(subId, subscription(subId, `cus_${user.id}`, 'active', { cancel_at_period_end: true }));
+  await sendWebhook({ id: 'evt_d2', type: 'customer.subscription.updated', data: { object: subscriptions.get(subId) } });
+  res = await call('DELETE', '/api/auth/me', { password: 'password123' });
+  assert.equal(res.status, 200);
+
+  assert.equal((await call('GET', '/api/people')).status, 401);
+  assert.equal((await client()('POST', '/api/auth/login', { email: 'leaving@example.com', password: 'password123' })).status, 401);
+  // The email can be used for a new account.
+  assert.equal((await client()('POST', '/api/auth/register', { name: 'Back', email: 'leaving@example.com', password: 'password123' })).status, 201);
 });

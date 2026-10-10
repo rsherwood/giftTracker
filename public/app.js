@@ -286,6 +286,8 @@
           h('li', null, '💷 One simple price: ', h('strong', null, b.price_label)),
           h('li', null, '🔒 Secure payment by Stripe. Cancel renewal any time.'),
         ),
+        h('p', { class: 'fine-print' }, 'Renews every year until you cancel. By upgrading you agree to our ',
+          h('a', { href: '/terms', target: '_blank' }, 'Terms'), '.'),
       ),
       onSubmit: startCheckout,
     });
@@ -351,12 +353,17 @@
     });
 
     const planSlot = h('div', null, planCard());
+    const deleteCard = h('div', { class: 'card plan-card danger-zone' },
+      h('h2', null, 'Delete account'),
+      h('p', null, 'Permanently delete your account, everyone on your list and all their gift ideas. This can’t be undone.'),
+      h('button', { class: 'btn btn-danger', type: 'button', onclick: confirmDeleteAccount }, 'Delete my account'));
     fill(app,
       h('a', { class: 'back', href: '#/' }, '← Everyone'),
       h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Your account'), h('p', null, state.user.email))),
       h('div', { class: 'account-grid' },
         planSlot,
         h('div', { class: 'card plan-card' }, h('h2', null, 'Profile'), nameForm),
+        deleteCard,
       ),
     );
 
@@ -374,6 +381,24 @@
       toast('🎉 Welcome to Premium!');
       history.replaceState(null, '', '#/account');
     }
+  }
+
+  function confirmDeleteAccount() {
+    openModal('Delete your account?', [
+      field('Enter your password to confirm', h('input', { name: 'password', type: 'password', required: true, autocomplete: 'current-password' })),
+    ], {
+      danger: true,
+      submitLabel: 'Delete everything',
+      extra: h('p', null, 'Your account, everyone on your list and all their gift ideas will be deleted straight away.'),
+      onSubmit: async (data) => {
+        await api('DELETE', '/auth/me', { password: data.get('password') });
+        state.user = null;
+        state.billing = null;
+        location.hash = '#/';
+        render();
+        toast('Your account has been deleted');
+      },
+    });
   }
 
   function confirmDialog(title, message, confirmLabel, onConfirm) {
@@ -406,6 +431,8 @@
         state.currencies.map((c) => h('option', { value: c, selected: c === guessCurrency() }, c)))),
       error,
       submit,
+      isSignup && h('p', { class: 'fine-print' }, 'By creating an account you confirm you’re 18 or over and agree to our ',
+        h('a', { href: '/terms', target: '_blank' }, 'Terms'), ' and ', h('a', { href: '/privacy', target: '_blank' }, 'Privacy Policy'), '.'),
       !isSignup && h('button', { class: 'link-button', type: 'button', onclick: () => renderAuth('forgot') }, 'Forgot your password?'),
     );
     form.addEventListener('submit', async (event) => {

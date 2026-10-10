@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
 const { STATUSES } = require('./db');
@@ -12,6 +13,12 @@ const CURRENCIES = ['USD', 'GBP', 'EUR', 'CAD', 'AUD', 'NZD', 'JPY', 'INR'];
 const SPENT_STATUSES = new Set(['purchased', 'received', 'wrapped']);
 const MAX_CENTS = 100_000_000; // 1,000,000.00
 const RESET_TTL_MS = 60 * 60 * 1000;
+const LEGAL_UPDATED = '10 October 2026';
+const LEGAL_PAGES = { terms: 'Terms of Service', privacy: 'Privacy Policy' };
+
+const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (c) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[c]));
 
 class HttpError extends Error {
   constructor(status, message, code) {
@@ -89,6 +96,7 @@ function createApp(db, options = {}) {
   const sendMail = options.sendMail || (async () => {});
   const auth = createAuth(db, { secureCookies });
   const billing = createBilling(db, { ...options.billing, appUrl });
+  const contactEmail = options.contactEmail || 'hello@firstwebdev.co.uk';
   const authLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: options.authAttemptLimit ?? 30 });
   const giftImage = (fields) => images.buildGiftImage(fields, { fetchRemote: fetchRemoteImages });
 
@@ -101,6 +109,8 @@ function createApp(db, options = {}) {
     findReset: db.prepare(`
       SELECT r.user_id, r.expires_at, u.email, u.name, u.currency
       FROM password_resets r JOIN users u ON u.id = r.user_id WHERE r.token_hash = ?`),
+    deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
+    userById: db.prepare('SELECT * FROM users WHERE id = ?'),
     deleteResets: db.prepare('DELETE FROM password_resets WHERE user_id = ? OR expires_at < ?'),
 
     people: db.prepare(`
@@ -212,6 +222,38 @@ function createApp(db, options = {}) {
     res.json({ received: true });
   }));
 
+  // Legal pages are rendered on the server so they work without JavaScript.
+  const legalTemplates = Object.fromEntries(Object.keys(LEGAL_PAGES).map((name) => [
+    name, fs.readFileSync(path.join(__dirname, 'legal', `${name}.html`), 'utf8'),
+  ]));
+  for (const [name, title] of Object.entries(LEGAL_PAGES)) {
+    app.get(`/${name}`, (_req, res) => {
+      const values = {
+        UPDATED: LEGAL_UPDATED,
+        APP_URL: appUrl.replace(/^https?:\/\//, ''),
+        CONTACT_EMAIL: contactEmail,
+        PRICE_LABEL: billing.priceLabel,
+        FREE_LIMIT: billing.FREE_PEOPLE_LIMIT,
+      };
+      const body = legalTemplates[name].replace(/\{\{(\w+)\}\}/g, (_m, key) => escapeHtml(values[key] ?? ''));
+      res.type('html').send(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${title} – Giftlist</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">🎁</span> Giftlist</a></header>
+  <main class="container legal">${body}</main>
+  <footer class="site-footer"><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · © First Impressions App Development Ltd</footer>
+</body>
+</html>`);
+    });
+  }
+
   app.use(express.static(path.join(__dirname, '..', 'public'), { index: 'index.html' }));
 
   const api = express.Router();
@@ -314,6 +356,24 @@ function createApp(db, options = {}) {
     if (!CURRENCIES.includes(currency)) throw new HttpError(400, 'Unsupported currency.');
     q.updateUser.run(name, currency, req.user.id);
     res.json({ user: { ...req.user, name, currency } });
+  });
+
+  // Permanently deletes the account and everything in it.
+  api.delete('/auth/me', auth.requireUser, authLimiter, (req, res) => {
+    const user = q.userById.get(req.user.id);
+    const password = typeof (req.body || {}).password === 'string' ? req.body.password.slice(0, 200) : '';
+    if (!verifyPassword(password, user.password_hash)) throw new HttpError(401, 'That password isn’t right.');
+    const sub = billing.summary(user.id).subscription;
+    if (sub && ['active', 'trialing', 'past_due'].includes(sub.status) && !sub.cancel_at_period_end) {
+      throw new HttpError(
+        409,
+        'Please cancel your Premium subscription first (Manage subscription), so you aren’t charged again.',
+        'cancel_subscription_first',
+      );
+    }
+    q.deleteUser.run(user.id); // Sessions, people, gifts and reset links go with it.
+    auth.endSession(req, res);
+    res.json({ ok: true });
   });
 
   // --- Billing ------------------------------------------------------------
