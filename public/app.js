@@ -344,8 +344,15 @@
 
     const nameInput = h('input', { name: 'name', required: true, maxlength: 80, value: state.user.name, autocomplete: 'name' });
     const nameError = h('p', { class: 'form-error', role: 'alert' });
+    const currencySelect = h('select', { name: 'currency' },
+      state.currencies.map((c) => h('option', { value: c, selected: c === state.user.currency }, c)));
     const nameForm = h('form', { class: 'inline-form', novalidate: true },
       field('Name', nameInput),
+      field('Currency symbol', currencySelect),
+      h('p', { class: 'field-note' },
+        'This only changes the symbol shown next to your amounts. ',
+        h('strong', null, 'It doesn’t convert them'),
+        ' – for example, £50 would simply show as $50. Your Premium price isn’t affected.'),
       h('button', { class: 'btn btn-ghost', type: 'submit' }, 'Save'),
       nameError,
     );
@@ -353,7 +360,7 @@
       event.preventDefault();
       nameError.textContent = '';
       try {
-        state.user = (await api('PATCH', '/auth/me', { name: nameInput.value })).user;
+        state.user = (await api('PATCH', '/auth/me', { name: nameInput.value, currency: currencySelect.value })).user;
         toast('Saved');
       } catch (err) {
         nameError.textContent = err.message;
@@ -435,7 +442,7 @@
         autocomplete: isSignup ? 'new-password' : 'current-password',
         placeholder: isSignup ? 'At least 8 characters' : null,
       })),
-      isSignup && field('Currency', h('select', { name: 'currency' },
+      isSignup && field('Currency symbol (you can change it later in Your account)', h('select', { name: 'currency' },
         state.currencies.map((c) => h('option', { value: c, selected: c === guessCurrency() }, c)))),
       error,
       submit,
@@ -975,19 +982,7 @@
     if (!b || !b.enabled) fill(badge);
     else if (b.premium) fill(badge, h('a', { class: 'plan-chip premium', href: '#/account' }, '⭐ Premium'));
     else fill(badge, h('button', { class: 'btn btn-sm btn-upgrade', type: 'button', onclick: showUpgrade }, '⭐ Upgrade'));
-    const select = document.getElementById('currency-select');
-    fill(select, ...state.currencies.map((c) => h('option', { value: c, selected: c === state.user.currency }, c)));
   }
-
-  document.getElementById('currency-select').addEventListener('change', async (event) => {
-    try {
-      const { user } = await api('PATCH', '/auth/me', { currency: event.target.value });
-      state.user = user;
-      render();
-    } catch (err) {
-      toast(err.message);
-    }
-  });
 
   document.getElementById('logout-btn').addEventListener('click', async () => {
     await api('POST', '/auth/logout').catch(() => {});
