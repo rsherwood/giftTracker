@@ -901,9 +901,10 @@
     if (overall == null) {
       return h('section', { class: 'card overall-panel empty-overall' },
         h('div', null,
-          h('h2', null, '💷 Overall budget'),
-          h('p', null, 'Set one budget for everyone, then share it out between the people on your list.')),
-        h('button', { class: 'btn btn-ghost', type: 'button', onclick: allocate }, 'Set overall budget'));
+          h('h2', null, '💷 Overall budget ', h('span', { class: 'optional-tag' }, 'Optional')),
+          h('p', null, 'If you like, set one budget for everyone and share it out between the people on your list. '
+            + 'Otherwise, just give each person their own budget – that works fine on its own.')),
+        h('button', { class: 'btn btn-ghost', type: 'button', onclick: allocate }, 'Set an overall budget'));
     }
     const allocated = totals.budget;
     const left = overall - allocated;
@@ -944,7 +945,7 @@
       const allocated = rows.reduce((sum, r) => sum + toCents(r.input.value), 0);
       summary.classList.toggle('over', Boolean(total) && allocated > total);
       if (!total) {
-        fill(summary, 'Allocated ', h('strong', null, money(allocated)), '. Set an overall budget above to see what’s left.');
+        fill(summary, 'Allocated ', h('strong', null, money(allocated)), '. (Add an overall budget above if you’d like to see how much is left.)');
       } else if (allocated <= total) {
         fill(summary, 'Allocated ', h('strong', null, money(allocated)), ` of ${money(total)} · `, h('strong', null, money(total - allocated)), ' left');
       } else {
@@ -973,7 +974,8 @@
     update();
 
     openModal('💷 Allocate your budget', [
-      field(`Overall budget (${state.user.currency})`, overallInput),
+      field(`Overall budget (${state.user.currency}) – optional`, overallInput),
+      h('p', { class: 'field-note' }, 'Leave this blank if you only want budgets for each person.'),
       h('div', { class: 'allocation-list' },
         rows.map((r) => h('label', { class: 'allocation-row' },
           avatar(r.person.name),
