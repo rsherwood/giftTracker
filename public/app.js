@@ -3,11 +3,13 @@
 (() => {
   const STATUSES = [
     { key: 'idea', label: 'Idea', icon: '💡' },
-    { key: 'buy', label: 'Buy', icon: '🛒' },
+    { key: 'buy', label: 'To Buy', icon: '🛒' },
     { key: 'purchased', label: 'Purchased', icon: '💳' },
     { key: 'received', label: 'Received', icon: '📦' },
     { key: 'wrapped', label: 'Wrapped', icon: '🎀' },
   ];
+  // Button text for moving a gift on to a stage ("Move to To Buy" reads oddly).
+  const moveLabel = (st) => (st.key === 'buy' ? 'Mark as To Buy' : `Move to ${st.label}`);
   const STATUS = Object.fromEntries(STATUSES.map((s, i) => [s.key, { ...s, index: i }]));
 
   const state = {
@@ -266,7 +268,7 @@
     return people.reduce((t, p) => ({
       budget: t.budget + p.budget_cents,
       spent: t.spent + p.spent_cents,
-      // Ideas aren't committed to yet, so only gifts at Buy or later count.
+      // Ideas aren't committed to yet, so only gifts at To Buy or later count.
       chosen: t.chosen + p.gift_count - p.n_idea,
       // Each count includes gifts that have gone further, e.g. wrapped gifts were also purchased.
       purchased: t.purchased + p.n_purchased + p.n_received + p.n_wrapped,
@@ -1183,7 +1185,7 @@
           person.locked ? null : h('div', { class: 'gift-row-actions' },
             next
               ? h('button', {
-                class: 'btn btn-sm btn-ghost', type: 'button', title: `Move to ${next.label}`, 'aria-label': `Move ${gift.name} to ${next.label}`,
+                class: 'btn btn-sm btn-ghost', type: 'button', title: moveLabel(next), 'aria-label': `${moveLabel(next)}: ${gift.name}`,
                 onclick: () => setStatus(gift, next.key),
               }, `${next.icon} `, h('span', { class: 'move-label' }, next.label))
               : h('span', { class: 'ready', title: 'Ready to give!' }, '🎉'),
@@ -1210,7 +1212,7 @@
         ),
         person.locked ? null : h('div', { class: 'gift-foot' },
           next
-            ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => setStatus(gift, next.key) }, `${next.icon} Move to ${next.label}`)
+            ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => setStatus(gift, next.key) }, `${next.icon} ${moveLabel(next)}`)
             : h('span', { class: 'pill st-wrapped', style: { flex: 1, justifyContent: 'center', padding: '6px' } }, '🎉 Ready to give!'),
           h('div', { class: 'menu' }, menuButton, menuList),
         ),

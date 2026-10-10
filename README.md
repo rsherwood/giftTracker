@@ -4,14 +4,14 @@ A small web app for keeping track of gifts. Users create an account, add the
 people they buy for with a budget for each, and log gift ideas (item name, link
 and price) per person. Each gift is tracked through:
 
-**Idea → Buy → Purchased → Received → Wrapped**
+**Idea → To Buy → Purchased → Received → Wrapped**
 
 ## Features
 
 - **Accounts**: email and password sign-up and log-in. Passwords are hashed with
   scrypt, and sessions use an HttpOnly cookie. Each user only sees their own data.
 - **People & budgets**: each person gets a budget bar showing what's been spent
-  (Purchased, Received or Wrapped), what's planned (Buy), and what's left or over.
+  (Purchased, Received or Wrapped), what's planned (To Buy), and what's left or over.
 - **Overall budget**: set one budget for everyone, then share it out between
   people on the Allocate screen (with live totals and a "Split evenly" button).
   The home page shows how much is allocated, left and spent.
