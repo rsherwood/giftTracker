@@ -44,6 +44,7 @@ before(async () => {
     authAttemptLimit: 1000,
     appUrl: 'https://gifts.example.test',
     contactEmail: 'help@example.test',
+    adminEmails: ['Boss@Example.com'],
     sendMail: async (message) => { mail.push(message); },
     billing: {
       stripe: fakeStripe,
@@ -448,4 +449,40 @@ test('feature requests are emailed to the site owner', async () => {
   const before = mail.length;
   assert.equal((await anon('POST', '/api/feedback', { message: 'Buy cheap watches now!!!', website: 'spam.example' })).status, 200);
   assert.equal(mail.length, before);
+});
+
+test('admin stats are only available to admin emails, and never include list contents', async () => {
+  const visitor = client();
+  assert.equal((await visitor('GET', '/api/admin/stats')).status, 404);
+
+  const { call: someone } = await newUser();
+  const { data: { person } } = await someone('POST', '/api/people', { name: 'Secret Santa Target' });
+  await someone('POST', `/api/people/${person.id}/gifts`, { name: 'Very private present', status: 'buy' });
+  assert.equal((await someone('GET', '/api/admin/stats')).status, 404);
+  assert.equal((await someone('GET', '/api/auth/me')).data.user.is_admin, false);
+
+  const { call: boss } = await newUser('boss@example.com');
+  assert.equal((await boss('GET', '/api/auth/me')).data.user.is_admin, true);
+  const res = await boss('GET', '/api/admin/stats');
+  assert.equal(res.status, 200);
+  const stats = res.data;
+  const userCount = stats.users.length;
+  assert.ok(stats.totals.users >= 2);
+  assert.equal(stats.totals.users, userCount);
+  assert.ok(stats.totals.users_7d >= 2);
+  assert.ok(stats.totals.active_7d >= 2);
+  assert.ok(stats.gifts_by_status.buy >= 1);
+  assert.ok(stats.signups_by_week.length >= 1);
+  assert.match(stats.signups_by_week[0].week_start, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(new Date(`${stats.signups_by_week[0].week_start}T00:00:00Z`).getUTCDay(), 1); // weeks start on Monday
+
+  const row = stats.users.find((u) => u.people === 1 && u.gifts === 1);
+  assert.ok(row);
+  assert.equal(row.plan, 'free');
+  assert.ok(row.last_login > Date.now() - 60_000);
+  assert.equal(stats.users.find((u) => u.email === 'owner@example.com').plan, 'comped');
+  assert.equal(stats.totals.comped, 1);
+
+  const body = JSON.stringify(stats);
+  assert.doesNotMatch(body, /Secret Santa Target|Very private present|password/);
 });

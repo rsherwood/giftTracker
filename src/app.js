@@ -7,6 +7,7 @@ const express = require('express');
 const { STATUSES } = require('./db');
 const { hashPassword, verifyPassword, DUMMY_HASH, sha256, createAuth, createRateLimiter } = require('./auth');
 const { createBilling } = require('./billing');
+const { createAdminStats } = require('./admin');
 const images = require('./images');
 
 const CURRENCIES = ['USD', 'GBP', 'EUR', 'CAD', 'AUD', 'NZD', 'JPY', 'INR'];
@@ -104,6 +105,10 @@ function createApp(db, options = {}) {
   const billing = createBilling(db, { ...options.billing, appUrl });
   const contactEmail = options.contactEmail || 'hello@firstwebdev.co.uk';
   const feedbackEmail = options.feedbackEmail || contactEmail;
+  const adminEmails = new Set((options.adminEmails || []).map((e) => e.trim().toLowerCase()).filter(Boolean));
+  const isAdmin = (user) => Boolean(user && adminEmails.has(user.email.toLowerCase()));
+  const withAdmin = (user) => ({ ...user, is_admin: isAdmin(user) });
+  const adminStats = createAdminStats(db, { premiumEmails: (options.billing || {}).premiumEmails || [] });
   const feedbackLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000, max: options.feedbackLimit ?? 10 });
   const authLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: options.authAttemptLimit ?? 30 });
   const giftImage = (fields) => images.buildGiftImage(fields, { fetchRemote: fetchRemoteImages });
@@ -317,7 +322,7 @@ function createApp(db, options = {}) {
 
     const { lastInsertRowid } = q.insertUser.run(email, name, hashPassword(password), currency);
     auth.startSession(res, Number(lastInsertRowid));
-    res.status(201).json({ user: { id: Number(lastInsertRowid), email, name, currency } });
+    res.status(201).json({ user: withAdmin({ id: Number(lastInsertRowid), email, name, currency }) });
   });
 
   api.post('/auth/login', authLimiter, (req, res) => {
@@ -328,7 +333,7 @@ function createApp(db, options = {}) {
     const ok = verifyPassword(password, user ? user.password_hash : DUMMY_HASH);
     if (!user || !ok) throw new HttpError(401, 'Incorrect email or password.');
     auth.startSession(res, user.id);
-    res.json({ user: { id: user.id, email: user.email, name: user.name, currency: user.currency } });
+    res.json({ user: withAdmin({ id: user.id, email: user.email, name: user.name, currency: user.currency }) });
   });
 
   api.post('/auth/logout', (req, res) => {
@@ -373,12 +378,12 @@ function createApp(db, options = {}) {
     q.deleteResets.run(reset.user_id, Date.now());
     auth.endAllSessions(reset.user_id);
     auth.startSession(res, reset.user_id);
-    res.json({ user: { id: reset.user_id, email: reset.email, name: reset.name, currency: reset.currency } });
+    res.json({ user: withAdmin({ id: reset.user_id, email: reset.email, name: reset.name, currency: reset.currency }) });
   });
 
   api.get('/auth/me', (req, res) => {
     res.json({
-      user: req.user || null,
+      user: req.user ? withAdmin(req.user) : null,
       currencies: CURRENCIES,
       statuses: STATUSES,
       // Lets the sign-up page describe the plans.
@@ -392,7 +397,7 @@ function createApp(db, options = {}) {
     const currency = has(body, 'currency') ? body.currency : req.user.currency;
     if (!CURRENCIES.includes(currency)) throw new HttpError(400, 'Unsupported currency.');
     q.updateUser.run(name, currency, req.user.id);
-    res.json({ user: { ...req.user, name, currency } });
+    res.json({ user: withAdmin({ ...req.user, name, currency }) });
   });
 
   // Permanently deletes the account and everything in it.
@@ -411,6 +416,15 @@ function createApp(db, options = {}) {
     q.deleteUser.run(user.id); // Sessions, people, gifts and reset links go with it.
     auth.endSession(req, res);
     res.json({ ok: true });
+  });
+
+  // --- Admin (site owner only) ---------------------------------------------
+
+  // Answers "not found" to everyone else, so the page's existence isn't revealed.
+  api.get('/admin/stats', (req, res) => {
+    if (!isAdmin(req.user)) throw new HttpError(404, 'Not found.');
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(adminStats());
   });
 
   // --- Feature requests -----------------------------------------------------

@@ -24,6 +24,8 @@ const app = createApp(db, {
   contactEmail: env.CONTACT_EMAIL || env.MAIL_FROM,
   // Where "Request a feature" messages go (defaults to the contact email).
   feedbackEmail: env.FEEDBACK_EMAIL,
+  // Comma-separated emails that can see the admin page (#/admin).
+  adminEmails: (env.ADMIN_EMAILS || '').split(','),
   // Set COOKIE_SECURE=true when serving over HTTPS.
   secureCookies: env.COOKIE_SECURE === 'true',
   // Set TRUST_PROXY=1 behind a reverse proxy so rate limiting sees client IPs.

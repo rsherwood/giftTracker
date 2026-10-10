@@ -440,6 +440,102 @@
     });
   }
 
+  // ------------------------------------------------------------------------
+  // Admin (site owner only)
+  // ------------------------------------------------------------------------
+
+  async function renderAdmin() {
+    fill(app, h('div', { class: 'loading-page' }, 'Loading…'));
+    let data;
+    try {
+      data = await api('GET', '/admin/stats');
+    } catch {
+      location.hash = '#/';
+      return;
+    }
+    const t = data.totals;
+    const dbDate = (s) => new Date(`${s.replace(' ', 'T')}Z`);
+    const day = (d) => (d ? new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
+    const ago = (ms) => {
+      if (!ms) return '—';
+      const days = Math.floor((Date.now() - ms) / 86400000);
+      return days <= 0 ? 'Today' : days === 1 ? 'Yesterday' : days < 30 ? `${days} days ago` : day(ms);
+    };
+    const stat = (label, value, note) => h('div', { class: 'card stat' },
+      h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, value), note ? h('div', { class: 'stat-note' }, note) : null);
+
+    const paying = t.premium;
+    const priceMatch = String((state.billing || state.plans).price_label).match(/^(\D*)(\d+(?:\.\d+)?)/);
+    const yearly = priceMatch ? `≈ ${priceMatch[1]}${(paying * Number(priceMatch[2])).toLocaleString()} a year` : null;
+
+    const planChip = (u) => {
+      if (u.plan === 'comped') return h('span', { class: 'plan-chip premium' }, '⭐ Comped');
+      if (u.plan !== 'premium') return h('span', { class: 'plan-chip' }, 'Free');
+      if (u.subscription_status === 'past_due') return h('span', { class: 'plan-chip warn' }, '⚠️ Payment failed');
+      if (u.cancelling) return h('span', { class: 'plan-chip premium', title: `Ends ${day(u.renews_or_ends)}` }, '⭐ Cancelling');
+      return h('span', { class: 'plan-chip premium', title: `Renews ${day(u.renews_or_ends)}` }, '⭐ Premium');
+    };
+
+    const tbody = h('tbody');
+    const search = h('input', { type: 'search', placeholder: 'Search name or email…', 'aria-label': 'Search users' });
+    const drawUsers = () => {
+      const term = search.value.trim().toLowerCase();
+      const list = data.users.filter((u) => !term || u.name.toLowerCase().includes(term) || u.email.toLowerCase().includes(term));
+      fill(tbody, list.length
+        ? list.map((u) => h('tr', null,
+          h('td', null, h('div', { class: 'cell-strong' }, u.name), h('div', { class: 'person-sub' }, u.email)),
+          h('td', null, planChip(u)),
+          h('td', { class: 'num' }, u.people),
+          h('td', { class: 'num' }, u.gifts),
+          h('td', null, day(dbDate(u.joined))),
+          h('td', null, ago(u.last_login))))
+        : h('tr', null, h('td', { colspan: 6, class: 'empty-cell' }, 'No matching users.')));
+    };
+    search.addEventListener('input', drawUsers);
+    drawUsers();
+
+    const maxWeek = Math.max(1, ...data.signups_by_week.map((w) => w.n));
+
+    fill(app,
+      h('div', { class: 'page-head' },
+        h('div', null, h('h1', null, '📊 Admin'), h('p', null, `Updated ${new Date(data.generated_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} · only visible to you`)),
+        h('button', { class: 'btn btn-ghost', type: 'button', onclick: renderAdmin }, '↻ Refresh')),
+      h('div', { class: 'stats' },
+        stat('Users', t.users, `+${t.users_7d} this week · +${t.users_30d} in 30 days`),
+        stat('Premium', paying, yearly),
+        stat('Logged in', t.active_7d, `in the last 7 days · ${t.active_30d} in 30 days`),
+        stat('Gifts', t.gifts, `${t.people} people · ${t.archived_gifts} past gifts`)),
+      h('div', { class: 'admin-grid' },
+        h('section', { class: 'card admin-card' },
+          h('h2', null, 'Subscriptions'),
+          h('ul', { class: 'admin-list' },
+            h('li', null, h('span', null, '⭐ Paying'), h('strong', null, paying)),
+            h('li', null, h('span', null, '↩️ Cancelling at period end'), h('strong', null, t.cancelling)),
+            h('li', null, h('span', null, '⚠️ Payment failed (Stripe retrying)'), h('strong', null, t.past_due)),
+            h('li', null, h('span', null, '🎟️ Comped (PREMIUM_EMAILS)'), h('strong', null, t.comped)),
+            h('li', null, h('span', null, 'Free'), h('strong', null, Math.max(t.users - paying - t.comped, 0))))),
+        h('section', { class: 'card admin-card' },
+          h('h2', null, 'Gifts by status'),
+          h('ul', { class: 'admin-list' }, STATUSES.map((s) => h('li', null, pill(s.key), h('strong', null, data.gifts_by_status[s.key] || 0))))),
+        h('section', { class: 'card admin-card' },
+          h('h2', null, 'Sign-ups by week'),
+          data.signups_by_week.length
+            ? h('ul', { class: 'admin-list weeks' }, data.signups_by_week.map((w) => h('li', null,
+              h('span', null, `w/c ${day(dbDate(`${w.week_start} 00:00:00`))}`),
+              h('span', { class: 'week-bar', 'aria-hidden': 'true' }, h('span', { style: { width: `${(w.n / maxWeek) * 100}%` } })),
+              h('strong', null, w.n))))
+            : h('p', { class: 'person-sub' }, 'No sign-ups in the last 12 weeks.'))),
+      h('section', { class: 'card admin-card' },
+        h('div', { class: 'admin-users-head' }, h('h2', null, `Users${data.users.length < t.users ? ` (newest ${data.users.length})` : ''}`), search),
+        h('div', { class: 'table-wrap' },
+          h('table', { class: 'admin-table' },
+            h('thead', null, h('tr', null,
+              h('th', null, 'User'), h('th', null, 'Plan'), h('th', { class: 'num' }, 'People'), h('th', { class: 'num' }, 'Gifts'),
+              h('th', null, 'Joined'), h('th', null, 'Last login'))),
+            tbody))),
+    );
+  }
+
   function confirmDialog(title, message, confirmLabel, onConfirm) {
     openModal(title, [], { submitLabel: confirmLabel, danger: true, extra: h('p', null, message), onSubmit: onConfirm });
   }
@@ -1001,6 +1097,7 @@
     topbar.hidden = !state.user;
     if (!state.user) return;
     document.getElementById('account-name').textContent = state.user.email;
+    document.getElementById('admin-link').hidden = !state.user.is_admin;
     const b = state.billing;
     const badge = document.getElementById('plan-badge');
     if (!b || !b.enabled) fill(badge);
@@ -1041,6 +1138,7 @@
     try {
       if (match) await renderPerson(match[1]);
       else if (route === '/account') await renderAccount(params);
+      else if (route === '/admin' && state.user.is_admin) await renderAdmin();
       else await renderPeople();
     } catch (err) {
       if (state.user) {

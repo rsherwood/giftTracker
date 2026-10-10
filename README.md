@@ -33,6 +33,9 @@ and price) per person. Each gift is tracked through:
   person's budget. If Premium lapses, past gifts are kept but hidden.
 - **Request a feature**: a footer link on every page opens a short form that
   emails the request to you, with Reply-To set to the sender.
+- **Admin page** (`#/admin`, only for `ADMIN_EMAILS`): sign-ups, Premium
+  subscribers, recent logins, gift totals and a searchable user list. It shows
+  accounts and counts only, never anyone's people or gift details.
 - **Password reset** by email, and **account deletion** from the account page.
 - **Terms of Service** (`/terms`) and **Privacy Policy** (`/privacy`), with the
   company details, price and contact email filled in automatically. Edit them
@@ -69,6 +72,7 @@ Configuration (environment variables):
 | `PRICE_LABEL`          | `£5/year`                 | Price shown in the app                              |
 | `CONTACT_EMAIL`        | `MAIL_FROM`, else `hello@firstwebdev.co.uk` | Contact address shown in the Terms and Privacy Policy |
 | `FEEDBACK_EMAIL`       | `CONTACT_EMAIL`           | Where "Request a feature" messages are emailed (Reply-To is the sender) |
+| `ADMIN_EMAILS`         | unset                     | Comma-separated emails that can open the admin page (`#/admin`) |
 | `PREMIUM_EMAILS`       | unset                     | Comma-separated emails that get Premium free (e.g. yours) |
 
 Product photo lookup makes outbound HTTP requests from the server. It refuses
@@ -147,6 +151,7 @@ src/index.js    Entry point (reads env, opens DB, starts server)
 src/app.js      Express app: auth, people, gifts and image API routes
 src/auth.js     Password hashing, sessions, rate limiting
 src/billing.js  Free/Premium plans, Stripe Checkout, portal and webhooks
+src/admin.js    Read-only statistics for the admin page
 src/mailer.js   Outgoing email (password resets)
 src/legal/      Terms of Service and Privacy Policy text
 src/db.js       SQLite schema
