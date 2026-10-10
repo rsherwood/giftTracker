@@ -16,7 +16,25 @@
     plans: { enabled: false, price_label: '£5/year', free_people_limit: 2 },
     billing: null,
     filter: 'all',
+    view: readView(),
   };
+
+  // Card or list layout for gift ideas, remembered on this device.
+  function readView() {
+    try {
+      return localStorage.getItem('giftlist.view') === 'list' ? 'list' : 'cards';
+    } catch {
+      return 'cards';
+    }
+  }
+  function setView(view) {
+    state.view = view;
+    try {
+      localStorage.setItem('giftlist.view', view);
+    } catch {
+      /* private browsing etc. – just don't remember it */
+    }
+  }
 
   const app = document.getElementById('app');
   const modal = document.getElementById('modal');
@@ -838,6 +856,14 @@
     });
 
     const filters = h('div', { class: 'filters', role: 'toolbar', 'aria-label': 'Filter by status' });
+    const viewToggle = h('div', { class: 'view-toggle', role: 'group', 'aria-label': 'Layout' });
+    function drawViewToggle() {
+      const btn = (key, icon, label) => h('button', {
+        type: 'button', 'aria-pressed': String(state.view === key), title: `${label} view`,
+        onclick: () => { setView(key); drawViewToggle(); drawGifts(); },
+      }, h('span', { 'aria-hidden': 'true' }, icon), h('span', { class: 'view-label' }, label));
+      fill(viewToggle, btn('cards', '▦', 'Cards'), btn('list', '☰', 'List'));
+    }
     const grid = h('div', { class: 'gift-grid' });
 
     function drawFilters() {
@@ -868,13 +894,17 @@
       }
     }
 
-    function giftCard(gift) {
+    // One gift, drawn as a card (grid view) or a compact row (list view).
+    function giftView(gift) {
       const s = STATUS[gift.status];
       const next = STATUSES[s.index + 1];
-      const imageBox = h('div', { class: `gift-image${gift.image_source === 'product' ? ' product' : ''}` },
-        h('img', { src: gift.image_url, alt: '', loading: 'lazy' }),
-        pill(gift.status),
-      );
+      const compact = state.view === 'list';
+      const imageBox = compact
+        ? h('div', { class: `gift-thumb${gift.image_source === 'product' ? ' product' : ''}` },
+          h('img', { src: gift.image_url, alt: '', loading: 'lazy' }))
+        : h('div', { class: `gift-image${gift.image_source === 'product' ? ' product' : ''}` },
+          h('img', { src: gift.image_url, alt: '', loading: 'lazy' }),
+          pill(gift.status));
 
       const menuList = h('div', { class: 'menu-list', role: 'menu', hidden: true });
       const menuButton = h('button', {
@@ -914,14 +944,42 @@
         }), 'danger'),
       );
 
+      const link = gift.url
+        ? h('a', { class: 'gift-link', href: gift.url, target: '_blank', rel: 'noopener noreferrer' }, `🔗 ${hostname(gift.url)}`)
+        : null;
+      const price = gift.price_cents ? money(gift.price_cents) : '—';
+
+      if (compact) {
+        const statusSelect = h('select', {
+          class: `status-select st-${gift.status}`, 'aria-label': `Status of ${gift.name}`, disabled: person.locked,
+          onchange: (event) => setStatus(gift, event.target.value),
+        }, STATUSES.map((st) => h('option', { value: st.key, selected: st.key === gift.status }, `${st.icon} ${st.label}`)));
+        return h('article', { class: 'card gift-row' },
+          imageBox,
+          h('div', { class: 'gift-row-main' },
+            h('div', { class: 'gift-name' }, gift.name),
+            link ? h('div', { class: 'gift-row-meta' }, link) : null),
+          h('div', { class: 'gift-price' }, price),
+          statusSelect,
+          person.locked ? null : h('div', { class: 'gift-row-actions' },
+            next
+              ? h('button', {
+                class: 'btn btn-sm btn-ghost', type: 'button', title: `Move to ${next.label}`, 'aria-label': `Move ${gift.name} to ${next.label}`,
+                onclick: () => setStatus(gift, next.key),
+              }, `${next.icon} `, h('span', { class: 'move-label' }, next.label))
+              : h('span', { class: 'ready', title: 'Ready to give!' }, '🎉'),
+            h('div', { class: 'menu' }, menuButton, menuList)),
+        );
+      }
+
       return h('article', { class: 'card gift-card' },
         imageBox,
         h('div', { class: 'gift-body' },
           h('div', { class: 'gift-title-row' },
             h('div', { class: 'gift-name' }, gift.name),
-            h('div', { class: 'gift-price' }, gift.price_cents ? money(gift.price_cents) : '—'),
+            h('div', { class: 'gift-price' }, price),
           ),
-          gift.url ? h('a', { class: 'gift-link', href: gift.url, target: '_blank', rel: 'noopener noreferrer' }, `🔗 ${hostname(gift.url)}`) : null,
+          link,
           h('ol', { class: 'stepper', 'aria-label': 'Status' },
             STATUSES.map((st, i) => h('li', { class: `st-${st.key} ${i <= s.index ? 'done' : ''} ${st.key === gift.status ? 'current' : ''}` },
               h('button', {
@@ -1055,6 +1113,7 @@
     }
 
     function drawGifts() {
+      grid.classList.toggle('list', state.view === 'list');
       const shown = state.filter === 'all' ? gifts : gifts.filter((g) => g.status === state.filter);
       if (!gifts.length) {
         fill(grid, h('div', { class: 'card empty', style: { gridColumn: '1 / -1' } },
@@ -1062,13 +1121,14 @@
       } else if (!shown.length) {
         fill(grid, h('div', { class: 'empty', style: { gridColumn: '1 / -1' } }, `Nothing at “${STATUS[state.filter].label}” right now.`));
       } else {
-        fill(grid, ...shown.map(giftCard));
+        fill(grid, ...shown.map(giftView));
       }
     }
 
     function drawAll() {
       drawHeader();
       drawFilters();
+      drawViewToggle();
       drawGifts();
       drawPast();
     }
@@ -1087,7 +1147,7 @@
               + `Everything for ${person.name} is still here – upgrade again to edit it.`)),
           h('button', { class: 'btn btn-upgrade', type: 'button', onclick: showUpgrade }, '⭐ Upgrade'))
         : h('section', { class: 'card add-gift' }, h('h2', null, 'Add a gift idea'), addForm),
-      filters,
+      h('div', { class: 'gift-toolbar' }, filters, viewToggle),
       grid,
       past,
     );
