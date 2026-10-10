@@ -1347,10 +1347,10 @@
 
     function drawGifts() {
       grid.classList.toggle('list', state.view === 'list');
-      // Ordered by stage (Idea → Buy → Purchased → Received → Wrapped); newest first within a stage.
+      // Newest first, by when they were added. Changing a status never moves a gift.
       const shown = (state.filter === 'all' ? gifts : gifts.filter((g) => g.status === state.filter))
         .slice()
-        .sort((a, b) => STATUS[a.status].index - STATUS[b.status].index);
+        .sort((a, b) => (b.created_at > a.created_at ? 1 : b.created_at < a.created_at ? -1 : b.id - a.id));
       if (!gifts.length) {
         fill(grid, h('div', { class: 'card empty', style: { gridColumn: '1 / -1' } },
           h('div', { class: 'big' }, '💡'), h('h2', null, 'No gift ideas yet'), person.locked ? null : h('p', null, `Add your first idea for ${person.name} above.`)));
