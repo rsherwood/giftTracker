@@ -82,7 +82,7 @@ h2 { font-size: 1.2rem; }
 .brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 1.15rem; color: var(--text); text-decoration: none; }
 .brand-mark { font-size: 1.3rem; }
 .account { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.account-name { color: var(--muted); font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18ch; }
+.account-name { color: var(--muted); font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: min(40ch, 42vw); }
 @media (max-width: 560px) { .account-name { display: none; } }
 
 /* ---------- Buttons & inputs ---------- */

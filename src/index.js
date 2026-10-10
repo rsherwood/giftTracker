@@ -7,6 +7,16 @@ const { createApp } = require('./app');
 const { createMailer } = require('./mailer');
 
 const env = process.env;
+
+// Reads a list of emails from a setting, forgiving stray quotes, spaces, commas or semicolons.
+const emailList = (value) => String(value || '')
+  .split(/[\s,;]+/)
+  .map((e) => e.replace(/^["'<]+|[">']+$/g, '').trim().toLowerCase())
+  .filter((e) => e.includes('@'));
+const adminEmails = emailList(env.ADMIN_EMAILS);
+console.log(adminEmails.length
+  ? `Admin page enabled for: ${adminEmails.join(', ')}`
+  : 'Admin page disabled (ADMIN_EMAILS is not set).');
 const STRIPE_API_VERSION = '2026-09-30.endive';
 const port = Number(env.PORT) || 3000;
 const dbFile = env.DATABASE_FILE || path.join(__dirname, '..', 'data', 'gift-tracker.db');
@@ -25,7 +35,7 @@ const app = createApp(db, {
   // Where "Request a feature" messages go (defaults to the contact email).
   feedbackEmail: env.FEEDBACK_EMAIL,
   // Comma-separated emails that can see the admin page (#/admin).
-  adminEmails: (env.ADMIN_EMAILS || '').split(','),
+  adminEmails,
   // Set COOKIE_SECURE=true when serving over HTTPS.
   secureCookies: env.COOKIE_SECURE === 'true',
   // Set TRUST_PROXY=1 behind a reverse proxy so rate limiting sees client IPs.
@@ -49,7 +59,7 @@ const app = createApp(db, {
     webhookSecret: env.STRIPE_WEBHOOK_SECRET,
     priceLabel: env.PRICE_LABEL || '£5/year',
     // Comma-separated emails that get Premium free (e.g. your own account).
-    premiumEmails: (env.PREMIUM_EMAILS || '').split(','),
+    premiumEmails: emailList(env.PREMIUM_EMAILS),
   },
 });
 
