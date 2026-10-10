@@ -103,6 +103,8 @@ function createApp(db, options = {}) {
   const auth = createAuth(db, { secureCookies });
   const billing = createBilling(db, { ...options.billing, appUrl });
   const contactEmail = options.contactEmail || 'hello@firstwebdev.co.uk';
+  const feedbackEmail = options.feedbackEmail || contactEmail;
+  const feedbackLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000, max: options.feedbackLimit ?? 10 });
   const authLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: options.authAttemptLimit ?? 30 });
   const giftImage = (fields) => images.buildGiftImage(fields, { fetchRemote: fetchRemoteImages });
 
@@ -283,7 +285,7 @@ function createApp(db, options = {}) {
 <body>
   <header class="topbar"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">🎁</span> Giftlist</a></header>
   <main class="container legal">${body}</main>
-  <footer class="site-footer"><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · © First Impressions App Development Ltd</footer>
+  <footer class="site-footer"><a href="/#/request-feature">💡 Request a feature</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · © First Impressions App Development Ltd</footer>
 </body>
 </html>`);
     });
@@ -410,6 +412,36 @@ function createApp(db, options = {}) {
     auth.endSession(req, res);
     res.json({ ok: true });
   });
+
+  // --- Feature requests -----------------------------------------------------
+
+  // Emails a feature request to the site owner. Works logged in or out.
+  api.post('/feedback', feedbackLimiter, wrap(async (req, res) => {
+    const body = req.body || {};
+    // Hidden field that people never see; bots that fill it in get a quiet "thanks".
+    if (body.website) return res.json({ ok: true });
+    const message = text(body.message, 'Your idea', { max: 3000, required: true });
+    if (message.length < 10) throw new HttpError(400, 'Please tell us a little more about your idea.');
+    const name = req.user ? req.user.name : text(body.name, 'Name', { max: 80 });
+    const email = req.user ? req.user.email : text(body.email, 'Email', { max: 254 }).toLowerCase();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, 'Please enter a valid email address.');
+
+    const plan = req.user ? (billing.summary(req.user.id).premium ? 'Premium' : 'Free') : 'Not logged in';
+    const summary = message.replace(/\s+/g, ' ').slice(0, 60);
+    try {
+      await sendMail({
+        to: feedbackEmail,
+        replyTo: email || undefined,
+        subject: `Giftlist feature request: ${summary}${message.length > 60 ? '…' : ''}`,
+        text: `${message}\n\n—\nFrom: ${name || '(no name)'} <${email || 'no email given'}>\nAccount: ${plan}`
+          + `${req.user ? ` (user #${req.user.id})` : ''}\nSent: ${new Date().toISOString()}\n`,
+      });
+    } catch (err) {
+      console.error('Feature request email failed:', err.message);
+      throw new HttpError(502, `Sorry, we couldn’t send that just now. You can email us at ${contactEmail} instead.`);
+    }
+    res.json({ ok: true });
+  }));
 
   // --- Billing ------------------------------------------------------------
 

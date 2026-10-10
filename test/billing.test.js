@@ -420,3 +420,32 @@ test('past gifts: Premium can archive, view and restore; others are asked to upg
   assert.equal((await call('POST', `/api/gifts/${socks.id}/restore`)).status, 402);
   assert.equal((await call('DELETE', `/api/gifts/${socks.id}`)).status, 402);
 });
+
+test('feature requests are emailed to the site owner', async () => {
+  // Logged out, with a reply address.
+  const anon = client();
+  let res = await anon('POST', '/api/feedback', { message: 'Please add birthday reminders!', name: 'Sam', email: 'Sam@Example.com' });
+  assert.equal(res.status, 200);
+  let mail1 = mail.at(-1);
+  assert.equal(mail1.to, 'help@example.test');
+  assert.equal(mail1.replyTo, 'sam@example.com');
+  assert.match(mail1.subject, /^Giftlist feature request: Please add birthday reminders!$/);
+  assert.match(mail1.text, /Please add birthday reminders!/);
+  assert.match(mail1.text, /Not logged in/);
+
+  // Logged in: name, email and plan come from the account.
+  const { call } = await newUser('ideas@example.com');
+  res = await call('POST', '/api/feedback', { message: 'Let me share a list with my partner. '.repeat(3) });
+  assert.equal(res.status, 200);
+  mail1 = mail.at(-1);
+  assert.equal(mail1.replyTo, 'ideas@example.com');
+  assert.match(mail1.text, /Account: Free \(user #\d+\)/);
+  assert.match(mail1.subject, /…$/);
+
+  // Validation and the spam trap.
+  assert.equal((await anon('POST', '/api/feedback', { message: 'short' })).status, 400);
+  assert.equal((await anon('POST', '/api/feedback', { message: 'A perfectly good idea here', email: 'nope' })).status, 400);
+  const before = mail.length;
+  assert.equal((await anon('POST', '/api/feedback', { message: 'Buy cheap watches now!!!', website: 'spam.example' })).status, 200);
+  assert.equal(mail.length, before);
+});

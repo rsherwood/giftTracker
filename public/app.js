@@ -416,6 +416,30 @@
     });
   }
 
+  function openFeatureRequest() {
+    const loggedIn = Boolean(state.user);
+    const message = h('textarea', {
+      name: 'message', required: true, maxlength: 3000, rows: 5,
+      placeholder: 'What would make Giftlist more useful for you?',
+    });
+    openModal('💡 Request a feature', [
+      field('Your idea', message),
+      loggedIn ? null : field('Your name (optional)', h('input', { name: 'name', maxlength: 80, autocomplete: 'name' })),
+      loggedIn ? null : field('Your email (optional, so we can reply)', h('input', { name: 'email', type: 'email', autocomplete: 'email' })),
+      // Hidden from people; catches spam bots that fill in every field.
+      h('input', { name: 'website', class: 'hp-field', tabindex: '-1', autocomplete: 'off', 'aria-hidden': 'true' }),
+    ], {
+      submitLabel: 'Send',
+      extra: h('p', null, loggedIn
+        ? 'We read every suggestion. We’ll reply to your account email if we have questions.'
+        : 'We read every suggestion.'),
+      onSubmit: async (data) => {
+        await api('POST', '/feedback', Object.fromEntries(data));
+        toast('Thanks! Your idea has been sent 💡');
+      },
+    });
+  }
+
   function confirmDialog(title, message, confirmLabel, onConfirm) {
     openModal(title, [], { submitLabel: confirmLabel, danger: true, extra: h('p', null, message), onSubmit: onConfirm });
   }
@@ -996,12 +1020,22 @@
     document.querySelectorAll('.menu-list').forEach((m) => { m.hidden = true; });
   });
 
+  let previousHash = null;
+
   async function render() {
     if (modal.open) modal.close();
     drawTopbar();
     const [route, query = ''] = location.hash.slice(1).split('?');
     const params = new URLSearchParams(query);
     if (route === '/reset' && params.get('token')) return renderReset(params.get('token'));
+    // The footer link opens the form over the page the person is already on.
+    if (route === '/request-feature') {
+      history.replaceState(null, '', previousHash || '#/');
+      if (!app.hasChildNodes() || previousHash === null) await render();
+      openFeatureRequest();
+      return;
+    }
+    previousHash = location.hash || '#/';
     if (!state.user) return renderAuth();
     const match = route.match(/^\/people\/(\d+)$/);
     try {

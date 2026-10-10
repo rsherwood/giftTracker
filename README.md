@@ -31,6 +31,8 @@ and price) per person. Each gift is tracked through:
   "Christmas 2026" (one at a time, or everything bought for a person in one
   go) to remember what you gave in previous years. Archiving resets that
   person's budget. If Premium lapses, past gifts are kept but hidden.
+- **Request a feature**: a footer link on every page opens a short form that
+  emails the request to you, with Reply-To set to the sender.
 - **Password reset** by email, and **account deletion** from the account page.
 - **Terms of Service** (`/terms`) and **Privacy Policy** (`/privacy`), with the
   company details, price and contact email filled in automatically. Edit them
@@ -66,6 +68,7 @@ Configuration (environment variables):
 | `STRIPE_WEBHOOK_SECRET`| unset                     | Signing secret of the webhook endpoint (`whsec_…`)  |
 | `PRICE_LABEL`          | `£5/year`                 | Price shown in the app                              |
 | `CONTACT_EMAIL`        | `MAIL_FROM`, else `hello@firstwebdev.co.uk` | Contact address shown in the Terms and Privacy Policy |
+| `FEEDBACK_EMAIL`       | `CONTACT_EMAIL`           | Where "Request a feature" messages are emailed (Reply-To is the sender) |
 | `PREMIUM_EMAILS`       | unset                     | Comma-separated emails that get Premium free (e.g. yours) |
 
 Product photo lookup makes outbound HTTP requests from the server. It refuses
