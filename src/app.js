@@ -421,6 +421,13 @@ function createApp(db, options = {}) {
     res.json({ ok: true });
   }));
 
+  // Quick check that the server is up and which version is running. Reveals
+  // only whether an admin is configured, not who.
+  api.get('/health', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true, version: options.version || 'dev', admin_page: adminEmails.size ? 'enabled' : 'disabled' });
+  });
+
   // --- Admin (site owner only) ---------------------------------------------
 
   // Answers "not found" to everyone else, so the page's existence isn't revealed.

@@ -518,3 +518,12 @@ test('deleting re-checks Stripe, so a missed cancellation webhook does not block
   subscriptions.set(subId, subscription(subId, `cus_${user.id}`, 'active', { cancel_at: 1893456000 }));
   assert.equal((await call('DELETE', '/api/auth/me', { password: 'password123' })).status, 200);
 });
+
+test('health check reports the version and whether the admin page is set up', async () => {
+  const res = await fetch(`${base}/api/health`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.admin_page, 'enabled');
+  assert.doesNotMatch(JSON.stringify(body), /@/);
+});

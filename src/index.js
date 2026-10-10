@@ -6,6 +6,8 @@ const { openDatabase } = require('./db');
 const { createApp } = require('./app');
 const { createMailer } = require('./mailer');
 
+const { version } = require('../package.json');
+
 const env = process.env;
 
 // Reads a list of emails from a setting, forgiving stray quotes, spaces, commas or semicolons.
@@ -14,7 +16,8 @@ const emailList = (value) => String(value || '')
   .map((e) => e.replace(/^["'<]+|[">']+$/g, '').trim().toLowerCase())
   .filter((e) => e.includes('@'));
 const adminEmails = emailList(env.ADMIN_EMAILS);
-console.log(adminEmails.length
+// Startup messages go to stderr so they show up in the host's stderr.log.
+console.error(adminEmails.length
   ? `Admin page enabled for: ${adminEmails.join(', ')}`
   : 'Admin page disabled (ADMIN_EMAILS is not set).');
 const STRIPE_API_VERSION = '2026-09-30.endive';
@@ -30,6 +33,7 @@ if (env.STRIPE_SECRET_KEY && !env.APP_URL) {
 const db = openDatabase(dbFile);
 const app = createApp(db, {
   appUrl,
+  version,
   // Shown in the Terms and Privacy Policy.
   contactEmail: env.CONTACT_EMAIL || env.MAIL_FROM,
   // Where "Request a feature" messages go (defaults to the contact email).
@@ -64,5 +68,5 @@ const app = createApp(db, {
 });
 
 app.listen(port, () => {
-  console.log(`Gift Tracker running at ${appUrl} (port ${port}, database: ${dbFile})`);
+  console.error(`Giftlist ${version} running at ${appUrl} (port ${port}, database: ${dbFile})`);
 });
