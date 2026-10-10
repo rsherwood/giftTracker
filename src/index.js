@@ -1,5 +1,13 @@
 'use strict';
 
+// node:sqlite still prints an "experimental feature" warning on every start.
+// It's expected, so keep it out of the logs; other warnings are still shown.
+process.removeAllListeners('warning');
+process.on('warning', (warning) => {
+  if (warning.name === 'ExperimentalWarning' && /SQLite/i.test(warning.message)) return;
+  console.error(`${warning.name}: ${warning.message}`);
+});
+
 const path = require('node:path');
 const Stripe = require('stripe');
 const { openDatabase } = require('./db');
@@ -15,11 +23,17 @@ const emailList = (value) => String(value || '')
   .split(/[\s,;]+/)
   .map((e) => e.replace(/^["'<]+|[">']+$/g, '').trim().toLowerCase())
   .filter((e) => e.includes('@'));
-const adminEmails = emailList(env.ADMIN_EMAILS);
+const adminEmails = emailList(env.ADMIN_EMAILS || env.ADMIN_EMAIL);
 // Startup messages go to stderr so they show up in the host's stderr.log.
-console.error(adminEmails.length
-  ? `Admin page enabled for: ${adminEmails.join(', ')}`
-  : 'Admin page disabled (ADMIN_EMAILS is not set).');
+if (adminEmails.length) {
+  console.error(`Admin page enabled for: ${adminEmails.join(', ')}`);
+} else {
+  // Help spot a mistyped setting name (only names are shown, never values).
+  const similar = Object.keys(env).filter((name) => /admin/i.test(name));
+  console.error(`Admin page disabled (ADMIN_EMAILS is not set).${similar.length
+    ? ` Settings with "admin" in the name: ${similar.map((n) => JSON.stringify(n)).join(', ')}`
+    : ' No settings with "admin" in the name were found.'}`);
+}
 const STRIPE_API_VERSION = '2026-09-30.endive';
 const port = Number(env.PORT) || 3000;
 const dbFile = env.DATABASE_FILE || path.join(__dirname, '..', 'data', 'gift-tracker.db');
@@ -68,5 +82,5 @@ const app = createApp(db, {
 });
 
 app.listen(port, () => {
-  console.error(`Giftlist ${version} running at ${appUrl} (port ${port}, database: ${dbFile})`);
+  console.error(`Giftlist ${version} running at ${appUrl} (port ${port}, database: ${path.resolve(dbFile)})`);
 });
