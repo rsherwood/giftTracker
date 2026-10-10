@@ -681,7 +681,7 @@
         autocomplete: isSignup ? 'new-password' : 'current-password',
         placeholder: isSignup ? 'At least 8 characters' : null,
       })),
-      isSignup && field('Currency symbol (you can change it later in Your account)', h('select', { name: 'currency' },
+      isSignup && field('Currency', h('select', { name: 'currency' },
         state.currencies.map((c) => h('option', { value: c, selected: c === guessCurrency() }, c)))),
       error,
       submit,
