@@ -1151,21 +1151,8 @@
       }, '⋯');
       const menuItem = (label, onclick, cls) => h('button', { type: 'button', role: 'menuitem', class: cls, onclick: () => { menuList.hidden = true; onclick(); } }, label);
 
-      async function regenerate(source) {
-        imageBox.classList.add('loading');
-        try {
-          const { gift: updated } = await api('POST', `/gifts/${gift.id}/image`, { source });
-          replaceGift(updated);
-          toast(updated.image_source === 'product' ? 'Found a product photo' : 'New picture generated');
-        } catch (err) {
-          imageBox.classList.remove('loading');
-          toast(err.message);
-        }
-      }
-
       fill(menuList,
         menuItem('✏️ Edit details', () => giftForm(gift, (updated) => { replaceGift(updated); toast('Saved'); })),
-        gift.url ? menuItem('🔍 Use product photo', () => regenerate('auto')) : null,
         menuItem(hasPremium() ? '🗄️ Archive' : '🗄️ Archive ⭐', () => archiveGift(gift)),
         s.index > 0 ? menuItem(`↩️ Back to ${STATUSES[s.index - 1].label}`, () => setStatus(gift, STATUSES[s.index - 1].key)) : null,
         menuItem('🗑️ Delete', () => confirmDialog('Delete this gift?', `“${gift.name}” will be removed.`, 'Delete', async () => {
