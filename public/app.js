@@ -756,7 +756,7 @@
         }
       }
 
-      menuList.append(
+      fill(menuList,
         menuItem('✏️ Edit details', () => giftForm(gift, (updated) => { replaceGift(updated); toast('Saved'); })),
         gift.url ? menuItem('🔍 Use product photo', () => regenerate('auto')) : null,
         menuItem('🎨 Generate artwork', () => regenerate('generated')),
