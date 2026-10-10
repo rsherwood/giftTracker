@@ -486,3 +486,35 @@ test('admin stats are only available to admin emails, and never include list con
   const body = JSON.stringify(stats);
   assert.doesNotMatch(body, /Secret Santa Target|Very private present|password/);
 });
+
+test('a portal cancellation recorded as cancel_at counts as cancelled', async () => {
+  const { call, user } = await newUser();
+  const subId = `sub_${user.id}`;
+  const customer = `cus_${user.id}`;
+  await call('POST', '/api/billing/checkout');
+  subscriptions.set(subId, subscription(subId, customer, 'active'));
+  await sendWebhook({ id: 'evt_c1', type: 'customer.subscription.updated', data: { object: subscriptions.get(subId) } });
+  assert.equal((await call('DELETE', '/api/auth/me', { password: 'password123' })).status, 409);
+
+  // Cancelled in the portal: newer API versions set cancel_at and leave the old flag false.
+  const endsAt = 1893456000; // 2030-01-01
+  subscriptions.set(subId, subscription(subId, customer, 'active', { cancel_at: endsAt, cancel_at_period_end: false }));
+  await sendWebhook({ id: 'evt_c2', type: 'customer.subscription.updated', data: { object: subscriptions.get(subId) } });
+  const billing = (await call('GET', '/api/billing')).data.billing;
+  assert.equal(billing.premium, true); // still Premium until it ends
+  assert.equal(billing.subscription.cancel_at_period_end, true);
+  assert.equal(billing.subscription.period_end, endsAt * 1000);
+  assert.equal((await call('DELETE', '/api/auth/me', { password: 'password123' })).status, 200);
+});
+
+test('deleting re-checks Stripe, so a missed cancellation webhook does not block it', async () => {
+  const { call, user } = await newUser();
+  const subId = `sub_${user.id}`;
+  await call('POST', '/api/billing/checkout');
+  subscriptions.set(subId, subscription(subId, `cus_${user.id}`, 'active'));
+  await sendWebhook({ id: 'evt_m1', type: 'customer.subscription.updated', data: { object: subscriptions.get(subId) } });
+
+  // Cancelled in Stripe, but the webhook never arrived.
+  subscriptions.set(subId, subscription(subId, `cus_${user.id}`, 'active', { cancel_at: 1893456000 }));
+  assert.equal((await call('DELETE', '/api/auth/me', { password: 'password123' })).status, 200);
+});

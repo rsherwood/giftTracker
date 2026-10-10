@@ -401,10 +401,13 @@ function createApp(db, options = {}) {
   });
 
   // Permanently deletes the account and everything in it.
-  api.delete('/auth/me', auth.requireUser, authLimiter, (req, res) => {
+  api.delete('/auth/me', auth.requireUser, authLimiter, wrap(async (req, res) => {
     const user = q.userById.get(req.user.id);
     const password = typeof (req.body || {}).password === 'string' ? req.body.password.slice(0, 200) : '';
     if (!verifyPassword(password, user.password_hash)) throw new HttpError(401, 'That password isn’t right.');
+    // Check with Stripe rather than trusting what we last stored, so a cancellation
+    // made a moment ago in the customer portal is recognised.
+    await billing.refreshFromStripe(user.id, { force: true });
     const sub = billing.summary(user.id).subscription;
     if (sub && ['active', 'trialing', 'past_due'].includes(sub.status) && !sub.cancel_at_period_end) {
       throw new HttpError(
@@ -416,7 +419,7 @@ function createApp(db, options = {}) {
     q.deleteUser.run(user.id); // Sessions, people, gifts and reset links go with it.
     auth.endSession(req, res);
     res.json({ ok: true });
-  });
+  }));
 
   // --- Admin (site owner only) ---------------------------------------------
 
@@ -461,9 +464,10 @@ function createApp(db, options = {}) {
 
   api.use(['/billing', '/people', '/gifts'], auth.requireUser);
 
-  api.get('/billing', (req, res) => {
+  api.get('/billing', wrap(async (req, res) => {
+    await billing.refreshFromStripe(req.user.id);
     res.json({ billing: billing.summary(req.user.id) });
-  });
+  }));
 
   api.post('/billing/checkout', wrap(async (req, res) => {
     if (!billing.enabled) throw new HttpError(400, 'Payments are not set up on this site.');

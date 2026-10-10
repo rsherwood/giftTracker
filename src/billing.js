@@ -128,13 +128,35 @@ function createBilling(db, { stripe = null, priceId = '', appUrl = '', priceLabe
   }
 
   function saveSubscription(user, subscription) {
+    // Newer Stripe API versions record "cancel at the end of the period" (e.g. from
+    // the customer portal) as a scheduled `cancel_at` date rather than the older
+    // `cancel_at_period_end` flag, so either one means it won't renew.
+    const cancelAt = subscription.cancel_at ? subscription.cancel_at * 1000 : null;
+    const cancelling = Boolean(subscription.cancel_at_period_end || cancelAt);
     q.setSubscription.run(
       subscription.id,
       subscription.status,
-      periodEnd(subscription),
-      subscription.cancel_at_period_end ? 1 : 0,
+      cancelAt || periodEnd(subscription),
+      cancelling ? 1 : 0,
       user.id,
     );
+  }
+
+  // Re-reads the user's subscription from Stripe, in case a webhook was missed or
+  // stored before this app understood `cancel_at`. Throttled per user.
+  const lastRefresh = new Map();
+  async function refreshFromStripe(userId, { force = false } = {}) {
+    if (!enabled) return;
+    const user = q.user.get(userId);
+    if (!user || !user.subscription_id || !PREMIUM_STATUSES.has(user.subscription_status)) return;
+    const now = Date.now();
+    if (!force && now - (lastRefresh.get(userId) || 0) < 5 * 60 * 1000) return;
+    lastRefresh.set(userId, now);
+    try {
+      saveSubscription(user, await stripe.subscriptions.retrieve(user.subscription_id));
+    } catch (err) {
+      console.error('Could not refresh subscription from Stripe:', err.message);
+    }
   }
 
   async function syncSubscription(subscriptionId, customerId, fallbackUserId) {
@@ -190,7 +212,10 @@ function createBilling(db, { stripe = null, priceId = '', appUrl = '', priceLabe
     }
   }
 
-  return { enabled, priceLabel, isPremium, summary, canAddPerson, lockedPeople, createCheckout, createPortal, handleEvent, FREE_PEOPLE_LIMIT };
+  return {
+    enabled, priceLabel, isPremium, summary, canAddPerson, lockedPeople, createCheckout, createPortal, handleEvent, refreshFromStripe,
+    FREE_PEOPLE_LIMIT,
+  };
 }
 
 module.exports = { createBilling, FREE_PEOPLE_LIMIT };
