@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Giftlist — gift ideas, budgets &amp; tracking</title>
+  <meta name="description" content="Keep track of gift ideas, budgets and purchase status for everyone on your list.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar" id="topbar" hidden>
+    <a class="brand" href="#/"><span class="brand-mark" aria-hidden="true">🎁</span> Giftlist</a>
+    <div class="account">
+      <label class="currency-picker">
+        <span class="sr-only">Currency</span>
+        <select id="currency-select"></select>
+      </label>
+      <span class="account-name" id="account-name"></span>
+      <button class="btn btn-ghost btn-sm" id="logout-btn" type="button">Log out</button>
+    </div>
+  </header>
+
+  <main id="app" class="container" aria-live="polite"></main>
+
+  <dialog id="modal" class="modal"></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

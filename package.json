@@ -1,0 +1,19 @@
+{
+  "name": "gift-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Track gift ideas, budgets and purchase status for the people you buy for.",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
