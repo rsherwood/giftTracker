@@ -6,6 +6,9 @@ const PREMIUM_STATUSES = new Set(['active', 'trialing', 'past_due']);
 
 const FREE_PEOPLE_LIMIT = 2;
 
+// Tags our Checkout Sessions so this flow can be tracked in the Stripe Dashboard.
+const INTEGRATION_IDENTIFIER = 'giftlist-premium-oifvwldj';
+
 /**
  * Stripe-backed Premium plan.
  *
@@ -88,6 +91,7 @@ function createBilling(db, { stripe = null, priceId = '', appUrl = '', priceLabe
     const user = q.user.get(userId);
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
+      integration_identifier: INTEGRATION_IDENTIFIER,
       customer: await customerFor(user),
       client_reference_id: String(user.id),
       line_items: [{ price: priceId, quantity: 1 }],
@@ -150,10 +154,18 @@ function createBilling(db, { stripe = null, priceId = '', appUrl = '', priceLabe
     saveSubscription(user, subscription);
   }
 
+  // Newer API versions moved an invoice's subscription under `parent`.
+  function invoiceSubscription(invoice) {
+    const ref = invoice.parent?.subscription_details?.subscription ?? invoice.subscription;
+    return typeof ref === 'string' ? ref : ref?.id;
+  }
+
   async function handleEvent(event) {
     const object = event.data.object;
     switch (event.type) {
       case 'checkout.session.completed':
+      // Bank-debit payments (e.g. Bacs) complete after the session does.
+      case 'checkout.session.async_payment_succeeded':
         if (object.mode === 'subscription' && object.subscription) {
           await syncSubscription(object.subscription, object.customer, object.client_reference_id);
         }
@@ -165,6 +177,14 @@ function createBilling(db, { stripe = null, priceId = '', appUrl = '', priceLabe
       case 'customer.subscription.resumed':
         await syncSubscription(object.id, object.customer, object.metadata?.user_id);
         break;
+      // Renewals and failed renewal payments. Re-reading the subscription picks
+      // up the new period end, or `past_due` / `unpaid` when payment fails.
+      case 'invoice.paid':
+      case 'invoice.payment_failed': {
+        const subscriptionId = invoiceSubscription(object);
+        if (subscriptionId) await syncSubscription(subscriptionId, object.customer);
+        break;
+      }
       default:
         break;
     }

@@ -279,3 +279,43 @@ test('after Premium lapses only the first two people can be changed', async () =
   await sendWebhook({ id: 'evt_c', type: 'customer.subscription.updated', data: { object: subscriptions.get(subId) } });
   assert.equal((await call('PATCH', `/api/people/${people[3].id}`, { budget: 5 })).status, 200);
 });
+
+test('renewals and failed renewal payments are picked up from invoice events', async () => {
+  const { call, user } = await newUser();
+  await call('POST', '/api/billing/checkout');
+  const [, params] = calls.findLast(([name]) => name === 'checkout.create');
+  assert.match(params.integration_identifier, /^giftlist-premium-[a-z]{8}$/);
+  assert.equal(params.payment_method_types, undefined);
+
+  const subId = `sub_${user.id}`;
+  const customer = `cus_${user.id}`;
+  // Newer API versions reference the subscription under invoice.parent.
+  const invoice = { object: 'invoice', customer, parent: { subscription_details: { subscription: subId } } };
+
+  subscriptions.set(subId, subscription(subId, customer, 'active'));
+  await sendWebhook({ id: 'evt_i1', type: 'invoice.paid', data: { object: invoice } });
+  assert.equal((await call('GET', '/api/billing')).data.billing.premium, true);
+
+  // A year later the renewal is paid and the period moves on.
+  subscriptions.set(subId, subscription(subId, customer, 'active', { items: { data: [{ current_period_end: 1924992000 }] } }));
+  await sendWebhook({ id: 'evt_i2', type: 'invoice.paid', data: { object: invoice } });
+  assert.equal((await call('GET', '/api/billing')).data.billing.subscription.period_end, 1924992000 * 1000);
+
+  // Renewal payment fails: Premium is kept while Stripe retries...
+  subscriptions.set(subId, subscription(subId, customer, 'past_due'));
+  await sendWebhook({ id: 'evt_i3', type: 'invoice.payment_failed', data: { object: invoice } });
+  let billing = (await call('GET', '/api/billing')).data.billing;
+  assert.equal(billing.premium, true);
+  assert.equal(billing.subscription.status, 'past_due');
+
+  // ...and ends once Stripe gives up.
+  subscriptions.set(subId, subscription(subId, customer, 'unpaid'));
+  await sendWebhook({ id: 'evt_i4', type: 'invoice.payment_failed', data: { object: invoice } });
+  billing = (await call('GET', '/api/billing')).data.billing;
+  assert.equal(billing.premium, false);
+
+  // Older payload shape (invoice.subscription) still works.
+  subscriptions.set(subId, subscription(subId, customer, 'active'));
+  await sendWebhook({ id: 'evt_i5', type: 'invoice.paid', data: { object: { object: 'invoice', customer, subscription: subId } } });
+  assert.equal((await call('GET', '/api/billing')).data.billing.premium, true);
+});

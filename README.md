@@ -67,24 +67,67 @@ fall back to generated artwork.
 
 ## Setting up Stripe
 
-1. Create a Stripe account and, while testing, switch to **Test mode**.
-2. **Product catalogue → Add product**: "Giftlist Premium", recurring price
-   **£5.00 per year**. Copy the price ID (`price_…`) into `STRIPE_PRICE_ID`.
-3. **Developers → API keys**: copy the secret key (`sk_test_…`, later
-   `sk_live_…`) into `STRIPE_SECRET_KEY`.
-4. **Developers → Webhooks → Add endpoint**:
-   `https://YOUR-SITE/api/stripe/webhook`, with the events
-   `checkout.session.completed`, `customer.subscription.created`,
-   `customer.subscription.updated` and `customer.subscription.deleted`.
-   Copy its signing secret (`whsec_…`) into `STRIPE_WEBHOOK_SECRET`.
-5. **Settings → Billing → Customer portal**: turn it on and allow customers to
-   cancel and update their payment method. This powers "Manage subscription".
-6. Restart the app and try an upgrade with the test card `4242 4242 4242 4242`.
-   When it works, repeat steps 2–4 in live mode and swap in the live values.
+Build and test in a **sandbox** first, then repeat the same steps in live mode.
 
-Premium is checked on every request from what Stripe last told the webhook, so
-renewals, failed payments (Premium is kept while Stripe retries) and
-cancellations are picked up automatically.
+1. **Create a sandbox.** In the Stripe Dashboard, open the account menu →
+   **Sandboxes → Create sandbox** (e.g. "Giftlist dev"). Sandboxes keep test
+   data and settings separate from live mode.
+2. **Product and price.** **Product catalogue → Add product**: name
+   "Giftlist Premium", recurring price **£5.00 per year**. Copy the price ID
+   (`price_…`) into `STRIPE_PRICE_ID`.
+3. **API key (restricted).** **Developers → API keys → Create restricted key**,
+   named "Giftlist server", with only these permissions:
+
+   | Resource | Permission |
+   | --- | --- |
+   | Customers | Write |
+   | Checkout Sessions | Write |
+   | Customer portal | Write |
+   | Subscriptions | Read |
+
+   Put the key (`rk_test_…`, later `rk_live_…`) in `STRIPE_SECRET_KEY`. Store it
+   only in the hosting control panel's environment variables, never in the
+   code or in git.
+4. **Webhook.** **Developers → Webhooks → Add destination**, endpoint
+   `https://YOUR-SITE/api/stripe/webhook`, API version **2026-09-30.endive**
+   (the version the app is pinned to), listening for:
+
+   - `checkout.session.completed`
+   - `checkout.session.async_payment_succeeded`
+   - `customer.subscription.created`, `.updated`, `.deleted`, `.paused`, `.resumed`
+   - `invoice.paid`
+   - `invoice.payment_failed`
+
+   Copy the signing secret (`whsec_…`) into `STRIPE_WEBHOOK_SECRET`.
+5. **Customer portal.** **Settings → Billing → Customer portal**: turn it on
+   and allow customers to cancel subscriptions, update payment methods and see
+   invoices. This powers "Manage subscription".
+6. **Failed payments.** **Settings → Billing → Subscriptions and emails**: turn
+   on Smart Retries and the emails for failed payments and expiring cards, so
+   Stripe chases failed renewals for you. While Stripe retries, the user keeps
+   Premium (`past_due`); if every retry fails, the subscription is cancelled
+   and the user drops to the free plan.
+7. **Test.** Restart the app and upgrade with the test card
+   `4242 4242 4242 4242` (any future expiry, any CVC). To try a renewal or a
+   failed renewal without waiting a year, use a **test clock** (Billing → Test
+   clocks) to move a test customer's subscription forward in time. The
+   webhook's event log in the Dashboard shows each delivery and the app's
+   response. If a call fails with a permissions error, add that permission
+   to the restricted key.
+8. **Go live.** Repeat steps 2–6 in live mode with a new restricted key and
+   webhook secret, and work through Stripe's
+   [go-live checklist](https://docs.stripe.com/get-started/checklist/go-live).
+
+**VAT / tax:** the app doesn't turn on Stripe Tax. That's correct while the
+business isn't VAT-registered. If you register for UK VAT, or sell to EU
+consumers in a way that requires EU VAT registration, add the registration in
+**Stripe Tax** first, then enable automatic tax on the Checkout Session.
+Enabling it without a registration silently collects nothing.
+
+**How the app stays in sync:** every webhook re-reads the subscription from
+Stripe rather than trusting the event body, so retries, duplicates and events
+arriving out of order are all safe. Users are matched to Stripe by customer
+ID; the user ID in Checkout's `client_reference_id` is only a fallback.
 
 ## Structure
 

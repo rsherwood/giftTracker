@@ -7,6 +7,7 @@ const { createApp } = require('./app');
 const { createMailer } = require('./mailer');
 
 const env = process.env;
+const STRIPE_API_VERSION = '2026-09-30.endive';
 const port = Number(env.PORT) || 3000;
 const dbFile = env.DATABASE_FILE || path.join(__dirname, '..', 'data', 'gift-tracker.db');
 // Public address of the site, used in emails and Stripe return links.
@@ -34,7 +35,10 @@ const app = createApp(db, {
   }),
   // Billing is off (everyone unlimited) until the Stripe variables are set.
   billing: {
-    stripe: env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : null,
+    // Use a restricted key (rk_…) with only the permissions listed in the README.
+    // The API version is pinned so a library upgrade can't change behaviour
+    // unnoticed; keep the webhook endpoint on the same version in Stripe.
+    stripe: env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: STRIPE_API_VERSION }) : null,
     priceId: env.STRIPE_PRICE_ID,
     webhookSecret: env.STRIPE_WEBHOOK_SECRET,
     priceLabel: env.PRICE_LABEL || '£5/year',
