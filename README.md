@@ -23,8 +23,10 @@ and price) per person. Each gift is tracked through:
   - Renaming a gift updates generated artwork. The card menu can also switch
     between the product photo and generated artwork.
 - **Plans**: free for up to 2 people; **Premium** (£5/year, via Stripe) for
-  unlimited people. If Premium lapses, nothing is deleted; the user just can't
-  add more people until they renew.
+  unlimited people. If Premium lapses, nothing is deleted: the first 2 people
+  the user added stay fully editable, and everyone else becomes read-only
+  (viewable and deletable, but their details and gifts can't be changed)
+  until they renew.
 - **Password reset** by email.
 - **Currency** per user (USD, GBP, EUR, CAD, AUD, NZD, JPY, INR).
 - Responsive layout with light and dark themes.

@@ -317,7 +317,7 @@
       h('div', { class: 'meter', role: 'img', 'aria-label': `${used} of ${b.free_people_limit} free people used` },
         h('span', { style: { width: `${(used / b.free_people_limit) * 100}%` } })),
       b.people_count > b.free_people_limit
-        ? h('p', null, `You have ${b.people_count} people from an earlier Premium subscription. They’re all still here; upgrade again to add more.`)
+        ? h('p', null, `You have ${b.people_count} people from an earlier Premium subscription. They’re all still here, but only the first ${b.free_people_limit} you added can be changed. Upgrade again to edit everyone.`)
         : null,
       h('p', null, `Upgrade to Premium for unlimited people – just ${b.price_label}.`),
       h('div', { class: 'actions' },
@@ -541,12 +541,13 @@
 
     const content = people.length
       ? h('div', { class: 'grid' },
-        people.map((p) => h('a', { class: 'card person-card', href: `#/people/${p.id}` },
+        people.map((p) => h('a', { class: `card person-card${p.locked ? ' locked' : ''}`, href: `#/people/${p.id}` },
           h('div', { class: 'person-top' },
             avatar(p.name),
             h('div', { style: { minWidth: 0 } },
               h('div', { class: 'person-name' }, p.name),
-              h('div', { class: 'person-sub' }, `${p.gift_count} gift${p.gift_count === 1 ? '' : 's'}`),
+              h('div', { class: 'person-sub' }, `${p.gift_count} gift${p.gift_count === 1 ? '' : 's'}`,
+                p.locked ? h('span', { class: 'plan-chip locked-chip', title: 'Upgrade to Premium to edit' }, '🔒 Read-only') : null),
             ),
           ),
           budgetBar(p),
@@ -611,7 +612,7 @@
             h('div', null, h('h1', null, person.name), h('div', { class: 'person-sub' }, person.budget_cents ? `Budget ${money(person.budget_cents)}` : 'No budget set')),
           ),
           h('div', { class: 'actions' },
-            h('button', {
+            person.locked ? null : h('button', {
               class: 'btn btn-ghost btn-sm', type: 'button',
               onclick: () => personForm(person, (updated) => { Object.assign(person, updated); gifts = updated.gifts; drawAll(); toast('Saved'); }),
             }, 'Edit'),
@@ -752,12 +753,13 @@
           h('ol', { class: 'stepper', 'aria-label': 'Status' },
             STATUSES.map((st, i) => h('li', { class: `st-${st.key} ${i <= s.index ? 'done' : ''} ${st.key === gift.status ? 'current' : ''}` },
               h('button', {
-                type: 'button', title: `Mark as ${st.label}`, 'aria-current': st.key === gift.status ? 'step' : null,
+                type: 'button', title: person.locked ? st.label : `Mark as ${st.label}`, 'aria-current': st.key === gift.status ? 'step' : null,
+                disabled: person.locked,
                 onclick: () => setStatus(gift, st.key),
               }, h('span', { class: 'bar' }), st.label))),
           ),
         ),
-        h('div', { class: 'gift-foot' },
+        person.locked ? null : h('div', { class: 'gift-foot' },
           next
             ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => setStatus(gift, next.key) }, `${next.icon} Move to ${next.label}`)
             : h('span', { class: 'pill st-wrapped', style: { flex: 1, justifyContent: 'center', padding: '6px' } }, '🎉 Ready to give!'),
@@ -770,7 +772,7 @@
       const shown = state.filter === 'all' ? gifts : gifts.filter((g) => g.status === state.filter);
       if (!gifts.length) {
         fill(grid, h('div', { class: 'card empty', style: { gridColumn: '1 / -1' } },
-          h('div', { class: 'big' }, '💡'), h('h2', null, 'No gift ideas yet'), h('p', null, `Add your first idea for ${person.name} above.`)));
+          h('div', { class: 'big' }, '💡'), h('h2', null, 'No gift ideas yet'), person.locked ? null : h('p', null, `Add your first idea for ${person.name} above.`)));
       } else if (!shown.length) {
         fill(grid, h('div', { class: 'empty', style: { gridColumn: '1 / -1' } }, `Nothing at “${STATUS[state.filter].label}” right now.`));
       } else {
@@ -790,7 +792,14 @@
     fill(app,
       h('a', { class: 'back', href: '#/' }, '← Everyone'),
       header,
-      h('section', { class: 'card add-gift' }, h('h2', null, 'Add a gift idea'), addForm),
+      person.locked
+        ? h('section', { class: 'card locked-notice' },
+          h('div', null,
+            h('h2', null, '🔒 Read-only'),
+            h('p', null, `Premium has ended, so you can only make changes for the first ${(state.billing || state.plans).free_people_limit} people you added. `
+              + `Everything for ${person.name} is still here – upgrade again to edit it.`)),
+          h('button', { class: 'btn btn-upgrade', type: 'button', onclick: showUpgrade }, '⭐ Upgrade'))
+        : h('section', { class: 'card add-gift' }, h('h2', null, 'Add a gift idea'), addForm),
       filters,
       grid,
     );

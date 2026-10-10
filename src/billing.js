@@ -25,6 +25,8 @@ function createBilling(db, { stripe = null, priceId = '', appUrl = '', priceLabe
         subscription_cancel_at_period_end = ?
       WHERE id = ?`),
     peopleCount: db.prepare('SELECT COUNT(*) AS n FROM people WHERE user_id = ?'),
+    // Everyone after the first FREE_PEOPLE_LIMIT people the user added.
+    peopleBeyondFree: db.prepare('SELECT id FROM people WHERE user_id = ? ORDER BY id LIMIT -1 OFFSET ?'),
   };
 
   function isPremium(user) {
@@ -59,6 +61,16 @@ function createBilling(db, { stripe = null, priceId = '', appUrl = '', priceLabe
   function canAddPerson(userId) {
     const user = q.user.get(userId);
     return isPremium(user) || q.peopleCount.get(userId).n < FREE_PEOPLE_LIMIT;
+  }
+
+  /**
+   * People the user can see but not change. Only non-empty after Premium
+   * lapses: the first FREE_PEOPLE_LIMIT people (in the order they were added)
+   * stay editable and the rest become read-only until the user upgrades again.
+   */
+  function lockedPeople(userId) {
+    if (isPremium(q.user.get(userId))) return new Set();
+    return new Set(q.peopleBeyondFree.all(userId, FREE_PEOPLE_LIMIT).map((row) => row.id));
   }
 
   async function customerFor(user) {
@@ -158,7 +170,7 @@ function createBilling(db, { stripe = null, priceId = '', appUrl = '', priceLabe
     }
   }
 
-  return { enabled, priceLabel, isPremium, summary, canAddPerson, createCheckout, createPortal, handleEvent, FREE_PEOPLE_LIMIT };
+  return { enabled, priceLabel, isPremium, summary, canAddPerson, lockedPeople, createCheckout, createPortal, handleEvent, FREE_PEOPLE_LIMIT };
 }
 
 module.exports = { createBilling, FREE_PEOPLE_LIMIT };

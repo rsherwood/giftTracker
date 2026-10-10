@@ -156,6 +156,25 @@ function createApp(db, options = {}) {
     if (!gift) throw new HttpError(404, 'Gift not found.');
     return gift;
   };
+  // For changes: the person must also be within the user's plan.
+  const editablePerson = (personId, userId) => {
+    const person = findPerson(personId, userId);
+    if (billing.lockedPeople(userId).has(person.id)) {
+      throw new HttpError(
+        402,
+        `Premium has ended, so only your first ${billing.FREE_PEOPLE_LIMIT} people can be changed. `
+          + 'Upgrade again to edit everyone.',
+        'upgrade_required',
+      );
+    }
+    return person;
+  };
+  const editableGift = (giftId, userId) => {
+    const gift = findGift(giftId, userId);
+    editablePerson(gift.person_id, userId);
+    return gift;
+  };
+
   const giftJson = (gift) => ({
     ...gift,
     image_url: `/api/gifts/${gift.id}/image?v=${gift.image_version}`,
@@ -323,7 +342,8 @@ function createApp(db, options = {}) {
   // --- People -------------------------------------------------------------
 
   api.get('/people', (req, res) => {
-    res.json({ people: q.people.all(req.user.id) });
+    const locked = billing.lockedPeople(req.user.id);
+    res.json({ people: q.people.all(req.user.id).map((p) => ({ ...p, locked: locked.has(p.id) })) });
   });
 
   api.post('/people', (req, res) => {
@@ -344,11 +364,13 @@ function createApp(db, options = {}) {
 
   api.get('/people/:id', (req, res) => {
     const person = findPerson(req.params.id, req.user.id);
-    res.json({ person: personJson(person, q.giftsForPerson.all(person.id)) });
+    res.json({
+      person: { ...personJson(person, q.giftsForPerson.all(person.id)), locked: billing.lockedPeople(req.user.id).has(person.id) },
+    });
   });
 
   api.patch('/people/:id', (req, res) => {
-    const person = findPerson(req.params.id, req.user.id);
+    const person = editablePerson(req.params.id, req.user.id);
     const body = req.body || {};
     const name = has(body, 'name') ? text(body.name, 'Name', { max: 80, required: true }) : person.name;
     const budget = has(body, 'budget') ? money(body.budget, 'Budget') : person.budget_cents;
@@ -357,6 +379,8 @@ function createApp(db, options = {}) {
     res.json({ person: personJson(findPerson(person.id, req.user.id), q.giftsForPerson.all(person.id)) });
   });
 
+  // Deliberately allowed for read-only people too, so nobody is stuck with
+  // data they want gone.
   api.delete('/people/:id', (req, res) => {
     const person = findPerson(req.params.id, req.user.id);
     q.deletePerson.run(person.id);
@@ -366,7 +390,7 @@ function createApp(db, options = {}) {
   // --- Gifts --------------------------------------------------------------
 
   api.post('/people/:id/gifts', wrap(async (req, res) => {
-    const person = findPerson(req.params.id, req.user.id);
+    const person = editablePerson(req.params.id, req.user.id);
     const body = req.body || {};
     const name = text(body.name, 'Item name', { max: 140, required: true });
     const url = link(body.url);
@@ -381,7 +405,7 @@ function createApp(db, options = {}) {
   }));
 
   api.patch('/gifts/:id', wrap(async (req, res) => {
-    const gift = findGift(req.params.id, req.user.id);
+    const gift = editableGift(req.params.id, req.user.id);
     const body = req.body || {};
     const name = has(body, 'name') ? text(body.name, 'Item name', { max: 140, required: true }) : gift.name;
     const url = has(body, 'url') ? link(body.url) : gift.url;
@@ -402,7 +426,7 @@ function createApp(db, options = {}) {
   // Re-create the image: `source: "generated"` forces new artwork, otherwise
   // the product photo is tried first.
   api.post('/gifts/:id/image', wrap(async (req, res) => {
-    const gift = findGift(req.params.id, req.user.id);
+    const gift = editableGift(req.params.id, req.user.id);
     const forceGenerated = (req.body || {}).source === 'generated';
     const image = forceGenerated ? images.generatedImage(gift.name) : await giftImage(gift);
     q.updateGiftImage.run(image.mime, image.data, image.source, gift.id);
@@ -420,7 +444,7 @@ function createApp(db, options = {}) {
   });
 
   api.delete('/gifts/:id', (req, res) => {
-    const gift = findGift(req.params.id, req.user.id);
+    const gift = editableGift(req.params.id, req.user.id);
     q.deleteGift.run(gift.id);
     res.json({ ok: true });
   });

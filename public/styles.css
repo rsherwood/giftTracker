@@ -336,3 +336,19 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .add-card-note { font-size: 0.8rem; font-weight: 500; color: var(--muted); }
 .plan-card > .btn { justify-self: start; }
 .btn { white-space: nowrap; }
+
+/* Read-only people after Premium lapses */
+.person-card.locked { opacity: 0.75; }
+.person-card.locked:hover { opacity: 1; }
+.locked-notice {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px;
+  padding: 18px; margin-bottom: 24px;
+  border-color: color-mix(in srgb, var(--gold) 55%, var(--border));
+  background: color-mix(in srgb, var(--gold) 8%, var(--surface));
+}
+.locked-notice > div { flex: 1 1 320px; }
+.locked-notice p { margin: 6px 0 0; color: var(--muted); }
+.stepper button:disabled { cursor: default; }
+.stepper button:disabled:hover { background: none; color: var(--muted); }
+.stepper .current button:disabled:hover { color: var(--text); }
+.locked-chip { margin-left: 8px; padding: 1px 8px; font-size: 0.75rem; }

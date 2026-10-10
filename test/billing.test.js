@@ -216,3 +216,66 @@ test('password reset by email', async () => {
   assert.equal((await client()('POST', '/api/auth/login', { email: 'forgetful@example.com', password: 'brand-new-password' })).status, 200);
   assert.equal((await client()('POST', '/api/auth/login', { email: 'forgetful@example.com', password: 'password123' })).status, 401);
 });
+
+test('after Premium lapses only the first two people can be changed', async () => {
+  const { call, user } = await newUser();
+  const subId = `sub_${user.id}`;
+  await call('POST', '/api/billing/checkout');
+  subscriptions.set(subId, subscription(subId, `cus_${user.id}`, 'active'));
+  await sendWebhook({ id: 'evt_a', type: 'customer.subscription.updated', data: { object: subscriptions.get(subId) } });
+
+  const people = [];
+  const gifts = [];
+  // Added in this order, but listed alphabetically, so "first two" must mean first added.
+  for (const name of ['Zed', 'Yan', 'Bea', 'Abe']) {
+    const { data: { person } } = await call('POST', '/api/people', { name });
+    const { data: { gift } } = await call('POST', `/api/people/${person.id}/gifts`, { name: `Gift for ${name}` });
+    people.push(person);
+    gifts.push(gift);
+  }
+
+  subscriptions.set(subId, subscription(subId, `cus_${user.id}`, 'canceled'));
+  await sendWebhook({ id: 'evt_b', type: 'customer.subscription.deleted', data: { object: subscriptions.get(subId) } });
+
+  const listed = (await call('GET', '/api/people')).data.people;
+  assert.deepEqual(
+    Object.fromEntries(listed.map((p) => [p.name, p.locked])),
+    { Abe: true, Bea: true, Yan: false, Zed: false },
+  );
+  assert.equal((await call('GET', `/api/people/${people[2].id}`)).data.person.locked, true);
+
+  // The first two are fully editable.
+  for (const i of [0, 1]) {
+    assert.equal((await call('PATCH', `/api/people/${people[i].id}`, { budget: 10 })).status, 200);
+    assert.equal((await call('POST', `/api/people/${people[i].id}/gifts`, { name: 'More' })).status, 201);
+    assert.equal((await call('PATCH', `/api/gifts/${gifts[i].id}`, { status: 'buy' })).status, 200);
+    assert.equal((await call('POST', `/api/gifts/${gifts[i].id}/image`, { source: 'generated' })).status, 200);
+    assert.equal((await call('DELETE', `/api/gifts/${gifts[i].id}`)).status, 200);
+  }
+
+  // The rest are read-only: viewable, but every change is refused.
+  for (const i of [2, 3]) {
+    assert.equal((await call('GET', `/api/people/${people[i].id}`)).status, 200);
+    for (const [method, path, body] of [
+      ['PATCH', `/api/people/${people[i].id}`, { name: 'x' }],
+      ['POST', `/api/people/${people[i].id}/gifts`, { name: 'x' }],
+      ['PATCH', `/api/gifts/${gifts[i].id}`, { status: 'buy' }],
+      ['POST', `/api/gifts/${gifts[i].id}/image`, { source: 'generated' }],
+      ['DELETE', `/api/gifts/${gifts[i].id}`],
+    ]) {
+      const res = await call(method, path, body);
+      assert.equal(res.status, 402, `${method} ${path}`);
+      assert.equal(res.data.code, 'upgrade_required');
+    }
+  }
+
+  // Deleting one of the first two moves the next person into the free allowance.
+  assert.equal((await call('DELETE', `/api/people/${people[0].id}`)).status, 200);
+  assert.equal((await call('PATCH', `/api/people/${people[2].id}`, { budget: 5 })).status, 200);
+  assert.equal((await call('PATCH', `/api/people/${people[3].id}`, { budget: 5 })).status, 402);
+
+  // Renewing unlocks everyone again.
+  subscriptions.set(subId, subscription(subId, `cus_${user.id}`, 'active'));
+  await sendWebhook({ id: 'evt_c', type: 'customer.subscription.updated', data: { object: subscriptions.get(subId) } });
+  assert.equal((await call('PATCH', `/api/people/${people[3].id}`, { budget: 5 })).status, 200);
+});
