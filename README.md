@@ -23,8 +23,8 @@ and price) per person. Each gift is tracked through:
   - Otherwise (or if no photo is found) it generates artwork: a colour gradient
     taken from the item name, an icon picked from keywords (🎧 headphones,
     ☕ coffee, 📚 books, …), and the item name.
-  - Renaming a gift updates generated artwork. The card menu can also switch
-    between the product photo and generated artwork.
+  - Renaming a gift updates generated artwork. For gifts with a link, the card
+    menu's "Use product photo" retries fetching the shop's picture.
 - **Plans**: free for up to 2 people; **Premium** (£5/year, via Stripe) for
   unlimited people. If Premium lapses, nothing is deleted: the first 2 people
   the user added stay fully editable, and everyone else becomes read-only

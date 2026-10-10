@@ -1166,7 +1166,6 @@
       fill(menuList,
         menuItem('✏️ Edit details', () => giftForm(gift, (updated) => { replaceGift(updated); toast('Saved'); })),
         gift.url ? menuItem('🔍 Use product photo', () => regenerate('auto')) : null,
-        menuItem('🎨 Generate artwork', () => regenerate('generated')),
         menuItem(hasPremium() ? '🗄️ Archive' : '🗄️ Archive ⭐', () => archiveGift(gift)),
         s.index > 0 ? menuItem(`↩️ Back to ${STATUSES[s.index - 1].label}`, () => setStatus(gift, STATUSES[s.index - 1].key)) : null,
         menuItem('🗑️ Delete', () => confirmDialog('Delete this gift?', `“${gift.name}” will be removed.`, 'Delete', async () => {
