@@ -1167,7 +1167,7 @@
         menuItem('✏️ Edit details', () => giftForm(gift, (updated) => { replaceGift(updated); toast('Saved'); })),
         gift.url ? menuItem('🔍 Use product photo', () => regenerate('auto')) : null,
         menuItem('🎨 Generate artwork', () => regenerate('generated')),
-        menuItem(hasPremium() ? '🗄️ Move to Past gifts' : '🗄️ Move to Past gifts ⭐', () => archiveGift(gift)),
+        menuItem(hasPremium() ? '🗄️ Archive' : '🗄️ Archive ⭐', () => archiveGift(gift)),
         s.index > 0 ? menuItem(`↩️ Back to ${STATUSES[s.index - 1].label}`, () => setStatus(gift, STATUSES[s.index - 1].key)) : null,
         menuItem('🗑️ Delete', () => confirmDialog('Delete this gift?', `“${gift.name}” will be removed.`, 'Delete', async () => {
           await api('DELETE', `/gifts/${gift.id}`);
@@ -1253,16 +1253,16 @@
           archived = fresh.archived || [];
           recompute();
           drawAll();
-          toast(result.archived === undefined ? 'Moved to Past gifts' : `${result.archived} gift${result.archived === 1 ? '' : 's'} moved to Past gifts`);
+          toast(result.archived === undefined ? 'Archived – see Past gifts' : `${result.archived} gift${result.archived === 1 ? '' : 's'} archived – see Past gifts`);
         },
       });
     }
 
     function archiveGift(gift) {
       archiveDialog({
-        title: 'Move to Past gifts',
+        title: 'Archive this gift',
         message: `“${gift.name}” will be kept under Past gifts so you can look back on it, and won’t count towards this budget.`,
-        submitLabel: '🗄️ Move to Past gifts',
+        submitLabel: '🗄️ Archive',
         request: (label) => api('POST', `/gifts/${gift.id}/archive`, { label }),
       });
     }
