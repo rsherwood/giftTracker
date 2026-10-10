@@ -27,6 +27,10 @@ and price) per person. Each gift is tracked through:
   the user added stay fully editable, and everyone else becomes read-only
   (viewable and deletable, but their details and gifts can't be changed)
   until they renew.
+- **Past gifts** (Premium): archive bought gifts under an occasion such as
+  "Christmas 2026" (one at a time, or everything bought for a person in one
+  go) to remember what you gave in previous years. Archiving resets that
+  person's budget. If Premium lapses, past gifts are kept but hidden.
 - **Password reset** by email, and **account deletion** from the account page.
 - **Terms of Service** (`/terms`) and **Privacy Policy** (`/privacy`), with the
   company details, price and contact email filled in automatically. Edit them

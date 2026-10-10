@@ -371,3 +371,34 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .legal ul { padding-left: 22px; }
 .legal li { margin: 6px 0; }
 .legal code { background: var(--surface-2); padding: 1px 6px; border-radius: 6px; }
+
+/* ---------- Past gifts ---------- */
+.past-gifts { display: grid; gap: 14px; margin-top: 36px; }
+.past-gifts > h2 { font-size: 1.3rem; }
+.past-hint { color: var(--muted); font-size: 0.9rem; text-align: center; padding: 8px 16px; }
+.past-hint strong { color: var(--text); }
+.past-locked {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; padding: 18px;
+}
+.past-locked > div { flex: 1 1 260px; }
+.past-locked p { margin: 6px 0 0; color: var(--muted); }
+.past-group { padding: 16px 18px; }
+.past-group-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin-bottom: 8px; }
+.past-group-head h3 { font-size: 1.05rem; }
+.past-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.past-list li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
+.past-list li:first-child { border-top: 0; }
+.past-list img { flex: none; width: 56px; height: 42px; object-fit: cover; border-radius: 8px; background: var(--surface-2); }
+.past-list img.product { object-fit: contain; background: #fff; }
+.past-info { flex: 1; min-width: 0; }
+.past-info .gift-name { font-weight: 600; overflow-wrap: anywhere; }
+.past-info a { color: inherit; }
+.past-actions { display: flex; gap: 6px; flex: none; }
+
+@media (max-width: 560px) {
+  .topbar { gap: 8px; }
+  .account { gap: 6px; }
+  .brand { font-size: 1.05rem; }
+  .currency-picker select { padding: 4px 6px; }
+  .account .btn-sm { padding: 4px 10px; }
+}

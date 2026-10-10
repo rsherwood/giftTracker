@@ -364,3 +364,59 @@ test('deleting an account', async () => {
   // The email can be used for a new account.
   assert.equal((await client()('POST', '/api/auth/register', { name: 'Back', email: 'leaving@example.com', password: 'password123' })).status, 201);
 });
+
+test('past gifts: Premium can archive, view and restore; others are asked to upgrade', async () => {
+  const { call, user } = await newUser();
+  const { data: { person } } = await call('POST', '/api/people', { name: 'Dad', budget: 100 });
+  const add = async (name, status, price) => (await call('POST', `/api/people/${person.id}/gifts`, { name, status, price })).data.gift;
+  const socks = await add('Socks', 'wrapped', 10);
+  const book = await add('Book', 'purchased', 15);
+  const idea = await add('Drone', 'idea', 200);
+
+  // Free plan: archiving needs Premium.
+  let res = await call('POST', `/api/gifts/${socks.id}/archive`, {});
+  assert.equal(res.status, 402);
+  assert.equal(res.data.code, 'upgrade_required');
+  assert.equal((await call('POST', `/api/people/${person.id}/archive-bought`, {})).status, 402);
+
+  // Upgrade.
+  const subId = `sub_${user.id}`;
+  await call('POST', '/api/billing/checkout');
+  subscriptions.set(subId, subscription(subId, `cus_${user.id}`, 'active'));
+  await sendWebhook({ id: 'evt_p1', type: 'customer.subscription.updated', data: { object: subscriptions.get(subId) } });
+
+  // Archive one gift with a label, then everything else that's been bought.
+  res = await call('POST', `/api/gifts/${socks.id}/archive`, { label: 'Dad’s birthday 2026' });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.gift.archive_label, 'Dad’s birthday 2026');
+  res = await call('POST', `/api/people/${person.id}/archive-bought`, {});
+  assert.equal(res.data.archived, 1); // just the book; the idea stays
+  assert.match(res.data.person.archived.find((g) => g.id === book.id).archive_label, /^Christmas \d{4}$/);
+
+  // Current list, budget and dashboard ignore past gifts.
+  let detail = (await call('GET', `/api/people/${person.id}`)).data.person;
+  assert.deepEqual(detail.gifts.map((g) => g.id), [idea.id]);
+  assert.equal(detail.spent_cents, 0);
+  assert.equal(detail.archived.length, 2);
+  assert.equal(detail.archived_count, 2);
+  const summary = (await call('GET', '/api/people')).data.people.find((p) => p.id === person.id);
+  assert.equal(summary.gift_count, 1);
+  assert.equal(summary.archived_count, 2);
+  assert.equal(summary.n_wrapped, 0);
+
+  // Past gifts are read-only until restored.
+  res = await call('PATCH', `/api/gifts/${book.id}`, { status: 'wrapped' });
+  assert.equal(res.status, 409);
+  assert.equal(res.data.code, 'archived');
+  assert.equal((await call('POST', `/api/gifts/${book.id}/restore`)).status, 200);
+  assert.equal((await call('PATCH', `/api/gifts/${book.id}`, { status: 'wrapped' })).status, 200);
+
+  // When Premium ends, past gifts are kept but hidden behind an upgrade.
+  subscriptions.set(subId, subscription(subId, `cus_${user.id}`, 'canceled'));
+  await sendWebhook({ id: 'evt_p2', type: 'customer.subscription.deleted', data: { object: subscriptions.get(subId) } });
+  detail = (await call('GET', `/api/people/${person.id}`)).data.person;
+  assert.equal(detail.archived, null);
+  assert.equal(detail.archived_count, 1);
+  assert.equal((await call('POST', `/api/gifts/${socks.id}/restore`)).status, 402);
+  assert.equal((await call('DELETE', `/api/gifts/${socks.id}`)).status, 402);
+});

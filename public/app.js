@@ -244,6 +244,13 @@
   // Plans & billing
   // ------------------------------------------------------------------------
 
+  // Matches the server: "Christmas 2026" until mid-2027.
+  function defaultOccasion(now = new Date()) {
+    return `Christmas ${now.getMonth() < 6 ? now.getFullYear() - 1 : now.getFullYear()}`;
+  }
+
+  const hasPremium = () => Boolean(state.billing && state.billing.premium);
+
   async function refreshBilling() {
     try {
       state.billing = (await api('GET', '/billing')).billing;
@@ -283,6 +290,7 @@
         h('p', null, `The free plan covers ${b.free_people_limit} people. Premium lets you plan gifts for everyone on your list.`),
         h('ul', { class: 'perks' },
           h('li', null, '🎁 Unlimited people and gift ideas'),
+          h('li', null, '🗄️ Past gifts: remember what you gave everyone in previous years'),
           h('li', null, '💷 One simple price: ', h('strong', null, b.price_label)),
           h('li', null, '🔒 Secure payment by Stripe. Cancel renewal any time.'),
         ),
@@ -639,9 +647,13 @@
             h('div', null, h('h1', null, person.name), h('div', { class: 'person-sub' }, person.budget_cents ? `Budget ${money(person.budget_cents)}` : 'No budget set')),
           ),
           h('div', { class: 'actions' },
+            !person.locked && gifts.some((g) => STATUS[g.status].index >= 2)
+              ? h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: archiveBought, title: 'Move bought gifts to Past gifts' },
+                '🗄️ Archive bought', hasPremium() ? null : ' ⭐')
+              : null,
             person.locked ? null : h('button', {
               class: 'btn btn-ghost btn-sm', type: 'button',
-              onclick: () => personForm(person, (updated) => { Object.assign(person, updated); gifts = updated.gifts; drawAll(); toast('Saved'); }),
+              onclick: () => personForm(person, (updated) => { Object.assign(person, updated); gifts = updated.gifts; archived = updated.archived || []; drawAll(); toast('Saved'); }),
             }, 'Edit'),
             h('button', {
               class: 'btn btn-danger btn-sm', type: 'button',
@@ -760,6 +772,7 @@
         menuItem('✏️ Edit details', () => giftForm(gift, (updated) => { replaceGift(updated); toast('Saved'); })),
         gift.url ? menuItem('🔍 Use product photo', () => regenerate('auto')) : null,
         menuItem('🎨 Generate artwork', () => regenerate('generated')),
+        menuItem(hasPremium() ? '🗄️ Move to Past gifts' : '🗄️ Move to Past gifts ⭐', () => archiveGift(gift)),
         s.index > 0 ? menuItem(`↩️ Back to ${STATUSES[s.index - 1].label}`, () => setStatus(gift, STATUSES[s.index - 1].key)) : null,
         menuItem('🗑️ Delete', () => confirmDialog('Delete this gift?', `“${gift.name}” will be removed.`, 'Delete', async () => {
           await api('DELETE', `/gifts/${gift.id}`);
@@ -795,6 +808,120 @@
       );
     }
 
+    // --- Past gifts (Premium)
+    let archived = person.archived || [];
+    const past = h('section', { class: 'past-gifts' });
+
+    function archiveDialog({ title, message, submitLabel, request }) {
+      if (!hasPremium()) {
+        showUpgrade();
+        return;
+      }
+      openModal(title, [
+        field('Occasion', h('input', { name: 'label', maxlength: 60, value: defaultOccasion(), autocomplete: 'off' })),
+      ], {
+        submitLabel,
+        extra: h('p', null, message),
+        onSubmit: async (data) => {
+          const result = await request(data.get('label'));
+          const fresh = result.person || (await api('GET', `/people/${person.id}`)).person;
+          Object.assign(person, fresh);
+          gifts = fresh.gifts;
+          archived = fresh.archived || [];
+          recompute();
+          drawAll();
+          toast(result.archived === undefined ? 'Moved to Past gifts' : `${result.archived} gift${result.archived === 1 ? '' : 's'} moved to Past gifts`);
+        },
+      });
+    }
+
+    function archiveGift(gift) {
+      archiveDialog({
+        title: 'Move to Past gifts',
+        message: `“${gift.name}” will be kept under Past gifts so you can look back on it, and won’t count towards this budget.`,
+        submitLabel: '🗄️ Move to Past gifts',
+        request: (label) => api('POST', `/gifts/${gift.id}/archive`, { label }),
+      });
+    }
+
+    function archiveBought() {
+      const bought = gifts.filter((g) => STATUS[g.status].index >= 2).length;
+      archiveDialog({
+        title: 'Archive bought gifts',
+        message: `Moves ${bought} gift${bought === 1 ? '' : 's'} at Purchased, Received or Wrapped into Past gifts and resets this budget. Ideas and gifts still to buy stay where they are.`,
+        submitLabel: `🗄️ Archive ${bought} gift${bought === 1 ? '' : 's'}`,
+        request: (label) => api('POST', `/people/${person.id}/archive-bought`, { label }),
+      });
+    }
+
+    async function restoreGift(gift) {
+      try {
+        const { gift: restored } = await api('POST', `/gifts/${gift.id}/restore`);
+        archived = archived.filter((g) => g.id !== gift.id);
+        person.archived_count -= 1;
+        gifts = [restored, ...gifts];
+        recompute();
+        drawAll();
+        toast(`${restored.name} is back on the list`);
+      } catch (err) {
+        if (err.code === 'upgrade_required') showUpgrade();
+        else toast(err.message);
+      }
+    }
+
+    function drawPast() {
+      if (!hasPremium()) {
+        fill(past, person.archived_count
+          ? h('div', { class: 'card past-locked' },
+            h('div', null,
+              h('h2', null, `🗄️ ${person.archived_count} past gift${person.archived_count === 1 ? '' : 's'}`),
+              h('p', null, `Past gifts are a Premium feature. They’re safely kept – upgrade to see what you’ve given ${person.name} before.`)),
+            h('button', { class: 'btn btn-upgrade', type: 'button', onclick: showUpgrade }, '⭐ Upgrade'))
+          : null);
+        return;
+      }
+      if (!archived.length) {
+        fill(past, h('div', { class: 'past-hint' },
+          '🗄️ When an occasion’s over, use ', h('strong', null, 'Archive bought'),
+          ` to keep a record of what you gave ${person.name} under Past gifts.`));
+        return;
+      }
+      // Group by occasion, newest first (the list already arrives newest first).
+      const groups = new Map();
+      for (const g of archived) {
+        const key = g.archive_label || 'Earlier';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(g);
+      }
+      fill(past,
+        h('h2', null, '🗄️ Past gifts'),
+        [...groups].map(([label, list]) => h('div', { class: 'card past-group' },
+          h('div', { class: 'past-group-head' },
+            h('h3', null, label),
+            h('span', { class: 'person-sub' }, `${list.length} gift${list.length === 1 ? '' : 's'} · ${money(list.reduce((sum, g) => sum + g.price_cents, 0))}`)),
+          h('ul', { class: 'past-list' }, list.map((g) => h('li', null,
+            h('img', { src: g.image_url, alt: '', loading: 'lazy', class: g.image_source === 'product' ? 'product' : null }),
+            h('div', { class: 'past-info' },
+              h('div', { class: 'gift-name' }, g.name),
+              h('div', { class: 'person-sub' },
+                g.price_cents ? money(g.price_cents) : null,
+                g.price_cents && g.url ? ' · ' : null,
+                g.url ? h('a', { href: g.url, target: '_blank', rel: 'noopener noreferrer' }, hostname(g.url)) : null)),
+            h('div', { class: 'past-actions' },
+              h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: () => restoreGift(g), title: 'Move back to the current list' }, 'Restore'),
+              h('button', {
+                class: 'btn btn-ghost btn-sm btn-icon', type: 'button', 'aria-label': `Delete ${g.name}`, title: 'Delete',
+                onclick: () => confirmDialog('Delete this past gift?', `“${g.name}” will be removed from Past gifts.`, 'Delete', async () => {
+                  await api('DELETE', `/gifts/${g.id}`);
+                  archived = archived.filter((x) => x.id !== g.id);
+                  person.archived_count -= 1;
+                  drawPast();
+                }),
+              }, '🗑️'),
+            )))))),
+      );
+    }
+
     function drawGifts() {
       const shown = state.filter === 'all' ? gifts : gifts.filter((g) => g.status === state.filter);
       if (!gifts.length) {
@@ -811,6 +938,7 @@
       drawHeader();
       drawFilters();
       drawGifts();
+      drawPast();
     }
 
     state.filter = 'all';
@@ -829,6 +957,7 @@
         : h('section', { class: 'card add-gift' }, h('h2', null, 'Add a gift idea'), addForm),
       filters,
       grid,
+      past,
     );
   }
 

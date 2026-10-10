@@ -68,6 +68,11 @@ const ADDED_COLUMNS = {
     subscription_period_end: 'INTEGER',
     subscription_cancel_at_period_end: 'INTEGER NOT NULL DEFAULT 0',
   },
+  gifts: {
+    // Set when a gift is moved to "Past gifts" (Premium), with the occasion it was for.
+    archived_at: 'INTEGER',
+    archive_label: "TEXT NOT NULL DEFAULT ''",
+  },
 };
 
 function migrate(db) {

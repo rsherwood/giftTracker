@@ -16,6 +16,12 @@ const RESET_TTL_MS = 60 * 60 * 1000;
 const LEGAL_UPDATED = '10 October 2026';
 const LEGAL_PAGES = { terms: 'Terms of Service', privacy: 'Privacy Policy' };
 
+// "Christmas 2026" until mid-year, so gifts archived in January still count for the last Christmas.
+function defaultOccasion(now = new Date()) {
+  const year = now.getMonth() < 6 ? now.getFullYear() - 1 : now.getFullYear();
+  return `Christmas ${year}`;
+}
+
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
@@ -122,8 +128,9 @@ function createApp(db, options = {}) {
         COALESCE(SUM(g.status = 'buy'), 0)       AS n_buy,
         COALESCE(SUM(g.status = 'purchased'), 0) AS n_purchased,
         COALESCE(SUM(g.status = 'received'), 0)  AS n_received,
-        COALESCE(SUM(g.status = 'wrapped'), 0)   AS n_wrapped
-      FROM people p LEFT JOIN gifts g ON g.person_id = p.id
+        COALESCE(SUM(g.status = 'wrapped'), 0)   AS n_wrapped,
+        (SELECT COUNT(*) FROM gifts a WHERE a.person_id = p.id AND a.archived_at IS NOT NULL) AS archived_count
+      FROM people p LEFT JOIN gifts g ON g.person_id = p.id AND g.archived_at IS NULL
       WHERE p.user_id = ?
       GROUP BY p.id
       ORDER BY p.name COLLATE NOCASE`),
@@ -134,10 +141,20 @@ function createApp(db, options = {}) {
 
     giftsForPerson: db.prepare(`
       SELECT id, person_id, name, url, price_cents, status, image_source, image_version, created_at, updated_at
-      FROM gifts WHERE person_id = ? ORDER BY created_at DESC, id DESC`),
+      FROM gifts WHERE person_id = ? AND archived_at IS NULL ORDER BY created_at DESC, id DESC`),
+    archivedForPerson: db.prepare(`
+      SELECT id, person_id, name, url, price_cents, status, image_source, image_version, created_at, updated_at,
+             archived_at, archive_label
+      FROM gifts WHERE person_id = ? AND archived_at IS NOT NULL ORDER BY archived_at DESC, id DESC`),
+    archivedCount: db.prepare('SELECT COUNT(*) AS n FROM gifts WHERE person_id = ? AND archived_at IS NOT NULL'),
+    archiveGift: db.prepare('UPDATE gifts SET archived_at = ?, archive_label = ? WHERE id = ?'),
+    restoreGift: db.prepare("UPDATE gifts SET archived_at = NULL, archive_label = '' WHERE id = ?"),
+    archiveBought: db.prepare(`
+      UPDATE gifts SET archived_at = ?, archive_label = ?
+      WHERE person_id = ? AND archived_at IS NULL AND status IN ('purchased','received','wrapped')`),
     gift: db.prepare(`
       SELECT g.id, g.person_id, g.name, g.url, g.price_cents, g.status, g.image_source, g.image_version,
-             g.created_at, g.updated_at
+             g.created_at, g.updated_at, g.archived_at, g.archive_label
       FROM gifts g JOIN people p ON p.id = g.person_id
       WHERE g.id = ? AND p.user_id = ?`),
     giftImage: db.prepare(`
@@ -181,8 +198,26 @@ function createApp(db, options = {}) {
   };
   const editableGift = (giftId, userId) => {
     const gift = findGift(giftId, userId);
+    if (gift.archived_at) throw new HttpError(409, 'This gift is in Past gifts. Restore it to change it.', 'archived');
     editablePerson(gift.person_id, userId);
     return gift;
+  };
+  // Past gifts (the archive) are a Premium feature.
+  const requirePremium = (userId) => {
+    if (!billing.summary(userId).premium) {
+      throw new HttpError(402, 'Past gifts is a Premium feature. Upgrade to archive and look back at old presents.', 'upgrade_required');
+    }
+  };
+  // Full details for the person page: current gifts, plus past gifts for Premium users
+  // (others just see how many they have).
+  const personDetail = (person, userId) => {
+    const premium = billing.summary(userId).premium;
+    return {
+      ...personJson(person, q.giftsForPerson.all(person.id)),
+      locked: billing.lockedPeople(userId).has(person.id),
+      archived: premium ? q.archivedForPerson.all(person.id).map(giftJson) : null,
+      archived_count: q.archivedCount.get(person.id).n,
+    };
   };
 
   const giftJson = (gift) => ({
@@ -424,9 +459,7 @@ function createApp(db, options = {}) {
 
   api.get('/people/:id', (req, res) => {
     const person = findPerson(req.params.id, req.user.id);
-    res.json({
-      person: { ...personJson(person, q.giftsForPerson.all(person.id)), locked: billing.lockedPeople(req.user.id).has(person.id) },
-    });
+    res.json({ person: personDetail(person, req.user.id) });
   });
 
   api.patch('/people/:id', (req, res) => {
@@ -436,7 +469,7 @@ function createApp(db, options = {}) {
     const budget = has(body, 'budget') ? money(body.budget, 'Budget') : person.budget_cents;
     const notes = has(body, 'notes') ? text(body.notes, 'Notes', { max: 1000 }) : person.notes;
     q.updatePerson.run(name, budget, notes, person.id);
-    res.json({ person: personJson(findPerson(person.id, req.user.id), q.giftsForPerson.all(person.id)) });
+    res.json({ person: personDetail(findPerson(person.id, req.user.id), req.user.id) });
   });
 
   // Deliberately allowed for read-only people too, so nobody is stuck with
@@ -504,9 +537,38 @@ function createApp(db, options = {}) {
   });
 
   api.delete('/gifts/:id', (req, res) => {
-    const gift = editableGift(req.params.id, req.user.id);
+    const gift = findGift(req.params.id, req.user.id);
+    if (gift.archived_at) requirePremium(req.user.id);
+    else editableGift(gift.id, req.user.id);
     q.deleteGift.run(gift.id);
     res.json({ ok: true });
+  });
+
+  // --- Past gifts (Premium) -------------------------------------------------
+
+  const archiveLabel = (value) => text(value, 'Occasion', { max: 60 }) || defaultOccasion();
+
+  api.post('/gifts/:id/archive', (req, res) => {
+    requirePremium(req.user.id);
+    const gift = editableGift(req.params.id, req.user.id);
+    q.archiveGift.run(Date.now(), archiveLabel((req.body || {}).label), gift.id);
+    res.json({ gift: giftJson(findGift(gift.id, req.user.id)) });
+  });
+
+  api.post('/gifts/:id/restore', (req, res) => {
+    requirePremium(req.user.id);
+    const gift = findGift(req.params.id, req.user.id);
+    editablePerson(gift.person_id, req.user.id);
+    q.restoreGift.run(gift.id);
+    res.json({ gift: giftJson(findGift(gift.id, req.user.id)) });
+  });
+
+  // End of an occasion: move everything already bought into Past gifts in one go.
+  api.post('/people/:id/archive-bought', (req, res) => {
+    requirePremium(req.user.id);
+    const person = editablePerson(req.params.id, req.user.id);
+    const { changes } = q.archiveBought.run(Date.now(), archiveLabel((req.body || {}).label), person.id);
+    res.json({ archived: Number(changes), person: personDetail(person, req.user.id) });
   });
 
   api.use((_req, _res, next) => next(new HttpError(404, 'Not found.')));
