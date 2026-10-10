@@ -1,6 +1,6 @@
 {
   "name": "gift-tracker",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "private": true,
   "description": "Track gift ideas, budgets and purchase status for the people you buy for.",
   "main": "src/index.js",

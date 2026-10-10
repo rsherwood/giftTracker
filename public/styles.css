@@ -535,3 +535,24 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .allocation-summary { margin: 0; color: var(--muted); }
 .allocation-summary strong { color: var(--text); }
 .split-btn { justify-self: start; }
+
+.celebration-banner {
+  position: fixed; left: 50%; bottom: 24px; z-index: 101; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px;
+  width: max-content; max-width: calc(100vw - 32px);
+  padding: 16px 20px; border-radius: 16px;
+  background: var(--st-wrapped); color: #fff;
+  font-size: 1.1rem; font-weight: 700; line-height: 1.35;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.25);
+  animation: banner-in 0.5s cubic-bezier(.2, 1.4, .4, 1) both;
+}
+.celebration-banner.leaving { animation: banner-out 0.4s ease both; }
+.celebration-icon { font-size: 1.6rem; }
+.celebration-close {
+  flex: none; width: 30px; height: 30px; margin-left: 4px; border: 0; border-radius: 50%;
+  background: rgb(255 255 255 / 0.2); color: #fff; font-size: 1.2rem; line-height: 1; cursor: pointer;
+}
+.celebration-close:hover { background: rgb(255 255 255 / 0.35); }
+@keyframes banner-in { from { opacity: 0; transform: translate(-50%, 40px) scale(0.9); } to { opacity: 1; transform: translateX(-50%); } }
+@keyframes banner-out { to { opacity: 0; transform: translate(-50%, 20px); } }
+@media (max-width: 560px) { .celebration-banner { font-size: 1rem; padding: 14px 16px; } }

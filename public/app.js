@@ -288,8 +288,24 @@
     } catch {
       /* no storage: celebrate anyway */
     }
-    toast('🎉 Everything’s wrapped – you’re all set!');
+    celebrationBanner('Everybody’s presents are all purchased, wrapped and complete!');
     confetti();
+  }
+
+  // A big message along the bottom of the screen explaining what the confetti is for.
+  function celebrationBanner(message) {
+    document.querySelector('.celebration-banner')?.remove();
+    document.getElementById('toast').hidden = true; // same spot on screen
+    const close = () => {
+      banner.classList.add('leaving');
+      setTimeout(() => banner.remove(), 400);
+    };
+    const banner = h('div', { class: 'celebration-banner', role: 'status' },
+      h('span', { class: 'celebration-icon', 'aria-hidden': 'true' }, '🎉'),
+      h('span', null, message),
+      h('button', { type: 'button', class: 'celebration-close', 'aria-label': 'Close', onclick: close }, '×'));
+    document.body.append(banner);
+    setTimeout(close, 7000);
   }
 
   function confetti() {
