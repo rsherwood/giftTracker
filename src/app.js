@@ -1,19 +1,23 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const path = require('node:path');
 const express = require('express');
 const { STATUSES } = require('./db');
-const { hashPassword, verifyPassword, DUMMY_HASH, createAuth, createRateLimiter } = require('./auth');
+const { hashPassword, verifyPassword, DUMMY_HASH, sha256, createAuth, createRateLimiter } = require('./auth');
+const { createBilling } = require('./billing');
 const images = require('./images');
 
 const CURRENCIES = ['USD', 'GBP', 'EUR', 'CAD', 'AUD', 'NZD', 'JPY', 'INR'];
 const SPENT_STATUSES = new Set(['purchased', 'received', 'wrapped']);
 const MAX_CENTS = 100_000_000; // 1,000,000.00
+const RESET_TTL_MS = 60 * 60 * 1000;
 
 class HttpError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -52,6 +56,13 @@ function link(value) {
   return url.toString();
 }
 
+function newPassword(value) {
+  const password = typeof value === 'string' ? value : '';
+  if (password.length < 8) throw new HttpError(400, 'Password must be at least 8 characters.');
+  if (password.length > 200) throw new HttpError(400, 'Password is too long.');
+  return password;
+}
+
 function status(value) {
   if (!STATUSES.includes(value)) throw new HttpError(400, `Status must be one of: ${STATUSES.join(', ')}.`);
   return value;
@@ -74,7 +85,10 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 
 function createApp(db, options = {}) {
   const { secureCookies = false, fetchRemoteImages = true, trustProxy = false } = options;
+  const appUrl = String(options.appUrl || '').replace(/\/+$/, '');
+  const sendMail = options.sendMail || (async () => {});
   const auth = createAuth(db, { secureCookies });
+  const billing = createBilling(db, { ...options.billing, appUrl });
   const authLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: options.authAttemptLimit ?? 30 });
   const giftImage = (fields) => images.buildGiftImage(fields, { fetchRemote: fetchRemoteImages });
 
@@ -82,6 +96,12 @@ function createApp(db, options = {}) {
     insertUser: db.prepare('INSERT INTO users (email, name, password_hash, currency) VALUES (?, ?, ?, ?)'),
     userByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
     updateUser: db.prepare('UPDATE users SET name = ?, currency = ? WHERE id = ?'),
+    setPassword: db.prepare('UPDATE users SET password_hash = ? WHERE id = ?'),
+    insertReset: db.prepare('INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?, ?, ?)'),
+    findReset: db.prepare(`
+      SELECT r.user_id, r.expires_at, u.email, u.name, u.currency
+      FROM password_resets r JOIN users u ON u.id = r.user_id WHERE r.token_hash = ?`),
+    deleteResets: db.prepare('DELETE FROM password_resets WHERE user_id = ? OR expires_at < ?'),
 
     people: db.prepare(`
       SELECT p.id, p.name, p.budget_cents, p.notes, p.created_at,
@@ -157,6 +177,22 @@ function createApp(db, options = {}) {
     next();
   });
 
+  // Stripe calls this directly, so it sits outside the JSON API (it needs the
+  // raw body to check the signature, and it can't send our request header).
+  app.post('/api/stripe/webhook', express.raw({ type: '*/*', limit: '1mb' }), wrap(async (req, res) => {
+    if (!billing.enabled) throw new HttpError(404, 'Not found.');
+    let event;
+    try {
+      event = options.billing.stripe.webhooks.constructEvent(
+        req.body, req.get('Stripe-Signature') || '', options.billing.webhookSecret || '',
+      );
+    } catch {
+      throw new HttpError(400, 'Invalid signature.');
+    }
+    await billing.handleEvent(event);
+    res.json({ received: true });
+  }));
+
   app.use(express.static(path.join(__dirname, '..', 'public'), { index: 'index.html' }));
 
   const api = express.Router();
@@ -177,9 +213,7 @@ function createApp(db, options = {}) {
     const name = text(body.name, 'Name', { max: 80, required: true });
     const email = text(body.email, 'Email', { max: 254, required: true }).toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, 'Please enter a valid email address.');
-    const password = typeof body.password === 'string' ? body.password : '';
-    if (password.length < 8) throw new HttpError(400, 'Password must be at least 8 characters.');
-    if (password.length > 200) throw new HttpError(400, 'Password is too long.');
+    const password = newPassword(body.password);
     const currency = CURRENCIES.includes(body.currency) ? body.currency : 'USD';
     if (q.userByEmail.get(email)) throw new HttpError(409, 'An account with that email already exists.');
 
@@ -204,8 +238,54 @@ function createApp(db, options = {}) {
     res.json({ ok: true });
   });
 
+  // Always answers the same way, so it can't be used to discover accounts.
+  api.post('/auth/forgot', authLimiter, wrap(async (req, res) => {
+    const email = typeof (req.body || {}).email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const user = email ? q.userByEmail.get(email) : null;
+    if (user) {
+      q.deleteResets.run(user.id, Date.now());
+      const token = crypto.randomBytes(32).toString('base64url');
+      q.insertReset.run(sha256(token), user.id, Date.now() + RESET_TTL_MS);
+      // The token goes after "#" so it never reaches server logs or Referer headers.
+      const link = `${appUrl}/#/reset?token=${token}`;
+      try {
+        await sendMail({
+          to: user.email,
+          subject: 'Reset your Giftlist password',
+          text: `Hi ${user.name},\n\nSomeone (hopefully you) asked to reset your Giftlist password. `
+            + `Use this link within the next hour:\n\n${link}\n\n`
+            + "If you didn't ask for this, you can ignore this email and your password won't change.\n",
+        });
+      } catch (err) {
+        console.error('Password reset email failed:', err.message);
+      }
+    }
+    res.json({ ok: true });
+  }));
+
+  api.post('/auth/reset', authLimiter, (req, res) => {
+    const body = req.body || {};
+    const token = typeof body.token === 'string' ? body.token : '';
+    const reset = token ? q.findReset.get(sha256(token)) : null;
+    if (!reset || reset.expires_at < Date.now()) {
+      throw new HttpError(400, 'This reset link has expired or already been used. Please request a new one.');
+    }
+    const password = newPassword(body.password);
+    q.setPassword.run(hashPassword(password), reset.user_id);
+    q.deleteResets.run(reset.user_id, Date.now());
+    auth.endAllSessions(reset.user_id);
+    auth.startSession(res, reset.user_id);
+    res.json({ user: { id: reset.user_id, email: reset.email, name: reset.name, currency: reset.currency } });
+  });
+
   api.get('/auth/me', (req, res) => {
-    res.json({ user: req.user || null, currencies: CURRENCIES, statuses: STATUSES });
+    res.json({
+      user: req.user || null,
+      currencies: CURRENCIES,
+      statuses: STATUSES,
+      // Lets the sign-up page describe the plans.
+      plans: { enabled: billing.enabled, price_label: billing.priceLabel, free_people_limit: billing.FREE_PEOPLE_LIMIT },
+    });
   });
 
   api.patch('/auth/me', auth.requireUser, (req, res) => {
@@ -217,15 +297,43 @@ function createApp(db, options = {}) {
     res.json({ user: { ...req.user, name, currency } });
   });
 
-  // --- People -------------------------------------------------------------
+  // --- Billing ------------------------------------------------------------
 
-  api.use(['/people', '/gifts'], auth.requireUser);
+  api.use(['/billing', '/people', '/gifts'], auth.requireUser);
+
+  api.get('/billing', (req, res) => {
+    res.json({ billing: billing.summary(req.user.id) });
+  });
+
+  api.post('/billing/checkout', wrap(async (req, res) => {
+    if (!billing.enabled) throw new HttpError(400, 'Payments are not set up on this site.');
+    if (billing.summary(req.user.id).premium) {
+      throw new HttpError(400, 'You already have Premium.');
+    }
+    res.json({ url: await billing.createCheckout(req.user.id) });
+  }));
+
+  api.post('/billing/portal', wrap(async (req, res) => {
+    if (!billing.enabled) throw new HttpError(400, 'Payments are not set up on this site.');
+    const url = await billing.createPortal(req.user.id);
+    if (!url) throw new HttpError(400, 'There is no subscription to manage yet.');
+    res.json({ url });
+  }));
+
+  // --- People -------------------------------------------------------------
 
   api.get('/people', (req, res) => {
     res.json({ people: q.people.all(req.user.id) });
   });
 
   api.post('/people', (req, res) => {
+    if (!billing.canAddPerson(req.user.id)) {
+      throw new HttpError(
+        402,
+        `The free plan covers ${billing.FREE_PEOPLE_LIMIT} people. Upgrade to Premium to add as many as you like.`,
+        'upgrade_required',
+      );
+    }
     const body = req.body || {};
     const name = text(body.name, 'Name', { max: 80, required: true });
     const budget = money(body.budget, 'Budget');
@@ -326,7 +434,7 @@ function createApp(db, options = {}) {
 
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
-    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
+    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, code: err.code });
     if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON body.' });
     if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Request is too large.' });
     console.error(err);

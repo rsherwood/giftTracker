@@ -45,6 +45,7 @@ function createAuth(db, { secureCookies }) {
       FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ?`),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash = ?'),
+    deleteUserSessions: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
     purgeExpired: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
   };
 
@@ -72,6 +73,11 @@ function createAuth(db, { secureCookies }) {
     res.setHeader('Set-Cookie', cookie('', 0));
   }
 
+  // Signs the user out everywhere, e.g. after a password reset.
+  function endAllSessions(userId) {
+    stmts.deleteUserSessions.run(userId);
+  }
+
   // Populates req.user when a valid session cookie is present.
   function loadUser(req, _res, next) {
     const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
@@ -89,7 +95,7 @@ function createAuth(db, { secureCookies }) {
     next();
   }
 
-  return { startSession, endSession, loadUser, requireUser };
+  return { startSession, endSession, endAllSessions, loadUser, requireUser };
 }
 
 // Very small fixed-window limiter for login/register attempts, keyed by IP.
@@ -114,4 +120,4 @@ function createRateLimiter({ windowMs, max }) {
   };
 }
 
-module.exports = { hashPassword, verifyPassword, DUMMY_HASH, createAuth, createRateLimiter };
+module.exports = { hashPassword, verifyPassword, DUMMY_HASH, sha256, createAuth, createRateLimiter };

@@ -300,3 +300,39 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* ---------- Plans & account ---------- */
+.muted { color: var(--muted); margin: 6px 0 0; }
+.link-button {
+  justify-self: center; padding: 4px; border: 0; background: none;
+  color: var(--accent-strong); font: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+}
+.link-button:hover { text-decoration: underline; }
+.pricing-note { margin-top: 18px; font-size: 1rem; }
+.pricing-note strong { color: var(--text); }
+
+.plan-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px;
+  background: var(--surface-2); color: var(--muted); font-size: 0.8rem; font-weight: 700;
+  white-space: nowrap; text-decoration: none;
+}
+.plan-chip.premium { background: color-mix(in srgb, var(--gold) 22%, transparent); color: color-mix(in srgb, var(--gold) 45%, var(--text)); }
+.btn-upgrade { background: var(--gold); color: #3a2a00; }
+.btn-upgrade:hover { background: color-mix(in srgb, var(--gold) 85%, #000); }
+
+.account-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; align-items: start; }
+@media (max-width: 760px) { .account-grid { grid-template-columns: 1fr; } }
+.plan-card { display: grid; gap: 14px; padding: 20px; }
+.plan-card p { margin: 0; color: var(--muted); }
+.plan-card.premium { border-color: color-mix(in srgb, var(--gold) 55%, var(--border)); }
+.plan-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.meter { height: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+.inline-form { display: grid; gap: 10px; }
+.inline-form .btn { justify-self: start; }
+
+.upgrade-pitch { display: grid; gap: 10px; }
+.perks { display: grid; gap: 8px; margin: 0; padding: 14px 16px; list-style: none; background: var(--surface-2); border-radius: 12px; }
+.add-card-note { font-size: 0.8rem; font-weight: 500; color: var(--muted); }
+.plan-card > .btn { justify-self: start; }
+.btn { white-space: nowrap; }

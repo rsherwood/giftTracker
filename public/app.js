@@ -13,6 +13,8 @@
   const state = {
     user: null,
     currencies: ['USD'],
+    plans: { enabled: false, price_label: '£5/year', free_people_limit: 2 },
+    billing: null,
     filter: 'all',
   };
 
@@ -66,7 +68,11 @@
       state.user = null;
       render();
     }
-    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    if (!res.ok) {
+      const err = new Error(data.error || `Request failed (${res.status})`);
+      err.code = data.code;
+      throw err;
+    }
     return data;
   }
 
@@ -201,7 +207,17 @@
       submitLabel: person ? 'Save' : 'Add person',
       onSubmit: async (data) => {
         const body = { name: data.get('name'), budget: data.get('budget'), notes: data.get('notes') };
-        const result = person ? await api('PATCH', `/people/${person.id}`, body) : await api('POST', '/people', body);
+        let result;
+        try {
+          result = person ? await api('PATCH', `/people/${person.id}`, body) : await api('POST', '/people', body);
+        } catch (err) {
+          if (err.code === 'upgrade_required') {
+            modal.close();
+            showUpgrade();
+            return;
+          }
+          throw err;
+        }
         onSaved(result.person);
       },
     });
@@ -224,6 +240,142 @@
     });
   }
 
+  // ------------------------------------------------------------------------
+  // Plans & billing
+  // ------------------------------------------------------------------------
+
+  async function refreshBilling() {
+    try {
+      state.billing = (await api('GET', '/billing')).billing;
+    } catch {
+      state.billing = null;
+    }
+    drawTopbar();
+    return state.billing;
+  }
+
+  const atFreeLimit = () => {
+    const b = state.billing;
+    return Boolean(b && b.enabled && !b.premium && b.people_count >= b.free_people_limit);
+  };
+
+  async function startCheckout() {
+    const { url } = await api('POST', '/billing/checkout');
+    location.href = url;
+    // Keep the button disabled while the browser leaves for Stripe.
+    await new Promise(() => {});
+  }
+
+  async function openPortal() {
+    try {
+      const { url } = await api('POST', '/billing/portal');
+      location.href = url;
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  function showUpgrade() {
+    const b = state.billing || state.plans;
+    openModal('Upgrade to Premium', [], {
+      submitLabel: `⭐ Upgrade – ${b.price_label}`,
+      extra: h('div', { class: 'upgrade-pitch' },
+        h('p', null, `The free plan covers ${b.free_people_limit} people. Premium lets you plan gifts for everyone on your list.`),
+        h('ul', { class: 'perks' },
+          h('li', null, '🎁 Unlimited people and gift ideas'),
+          h('li', null, '💷 One simple price: ', h('strong', null, b.price_label)),
+          h('li', null, '🔒 Secure payment by Stripe. Cancel renewal any time.'),
+        ),
+      ),
+      onSubmit: startCheckout,
+    });
+  }
+
+  function planCard() {
+    const b = state.billing;
+    if (!b) return h('div', { class: 'card plan-card' }, h('p', null, 'Couldn’t load your plan. Please refresh.'));
+    const date = (ms) => new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+
+    if (!b.enabled) {
+      return h('div', { class: 'card plan-card' }, h('h2', null, 'Your plan'), h('p', null, 'Everything is unlocked on this site.'));
+    }
+    if (b.premium) {
+      const sub = b.subscription;
+      let detail = 'Unlimited people and gift ideas.';
+      if (b.comped) detail = 'Complimentary Premium – no payment needed.';
+      else if (sub && sub.status === 'past_due') detail = 'Your last payment didn’t go through. Please update your card to keep Premium.';
+      else if (sub && sub.period_end) detail = sub.cancel_at_period_end ? `Ends on ${date(sub.period_end)}. It won’t renew.` : `Renews on ${date(sub.period_end)}.`;
+      return h('div', { class: 'card plan-card premium' },
+        h('div', { class: 'plan-title' }, h('h2', null, 'Premium'), h('span', { class: 'plan-chip premium' }, '⭐ Premium')),
+        h('p', null, detail),
+        sub && !b.comped ? h('button', { class: 'btn btn-ghost', type: 'button', onclick: openPortal }, 'Manage subscription & invoices') : null,
+      );
+    }
+    const used = Math.min(b.people_count, b.free_people_limit);
+    return h('div', { class: 'card plan-card' },
+      h('div', { class: 'plan-title' }, h('h2', null, 'Free plan'), h('span', { class: 'plan-chip' }, `${used} of ${b.free_people_limit} people used`)),
+      h('div', { class: 'meter', role: 'img', 'aria-label': `${used} of ${b.free_people_limit} free people used` },
+        h('span', { style: { width: `${(used / b.free_people_limit) * 100}%` } })),
+      b.people_count > b.free_people_limit
+        ? h('p', null, `You have ${b.people_count} people from an earlier Premium subscription. They’re all still here; upgrade again to add more.`)
+        : null,
+      h('p', null, `Upgrade to Premium for unlimited people – just ${b.price_label}.`),
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn', type: 'button', onclick: showUpgrade }, '⭐ Upgrade to Premium'),
+        b.subscription ? h('button', { class: 'btn btn-ghost', type: 'button', onclick: openPortal }, 'Past invoices') : null,
+      ),
+    );
+  }
+
+  async function renderAccount(params) {
+    fill(app, h('div', { class: 'loading-page' }, 'Loading…'));
+    await refreshBilling();
+    const returning = params.get('checkout') === 'success';
+
+    const nameInput = h('input', { name: 'name', required: true, maxlength: 80, value: state.user.name, autocomplete: 'name' });
+    const nameError = h('p', { class: 'form-error', role: 'alert' });
+    const nameForm = h('form', { class: 'inline-form', novalidate: true },
+      field('Name', nameInput),
+      h('button', { class: 'btn btn-ghost', type: 'submit' }, 'Save'),
+      nameError,
+    );
+    nameForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      nameError.textContent = '';
+      try {
+        state.user = (await api('PATCH', '/auth/me', { name: nameInput.value })).user;
+        toast('Saved');
+      } catch (err) {
+        nameError.textContent = err.message;
+      }
+    });
+
+    const planSlot = h('div', null, planCard());
+    fill(app,
+      h('a', { class: 'back', href: '#/' }, '← Everyone'),
+      h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'Your account'), h('p', null, state.user.email))),
+      h('div', { class: 'account-grid' },
+        planSlot,
+        h('div', { class: 'card plan-card' }, h('h2', null, 'Profile'), nameForm),
+      ),
+    );
+
+    // Stripe confirms payment with a webhook, which can take a few seconds.
+    if (returning && !state.billing?.premium) {
+      fill(planSlot, h('div', { class: 'card plan-card' }, h('h2', null, 'Confirming your payment…'), h('p', null, 'This usually takes a few seconds.')));
+      for (let i = 0; i < 10 && !state.billing?.premium; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        await refreshBilling();
+      }
+      fill(planSlot, planCard());
+      if (!state.billing?.premium) toast('Payment received – Premium will appear shortly. Try refreshing in a minute.');
+    }
+    if (returning && state.billing?.premium) {
+      toast('🎉 Welcome to Premium!');
+      history.replaceState(null, '', '#/account');
+    }
+  }
+
   function confirmDialog(title, message, confirmLabel, onConfirm) {
     openModal(title, [], { submitLabel: confirmLabel, danger: true, extra: h('p', null, message), onSubmit: onConfirm });
   }
@@ -233,6 +385,7 @@
   // ------------------------------------------------------------------------
 
   function renderAuth(mode = 'login') {
+    if (mode === 'forgot') return renderForgot();
     const error = h('p', { class: 'form-error', role: 'alert' });
     const isSignup = mode === 'signup';
     const guessCurrency = () => {
@@ -253,6 +406,7 @@
         state.currencies.map((c) => h('option', { value: c, selected: c === guessCurrency() }, c)))),
       error,
       submit,
+      !isSignup && h('button', { class: 'link-button', type: 'button', onclick: () => renderAuth('forgot') }, 'Forgot your password?'),
     );
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -262,6 +416,7 @@
       try {
         const { user } = await api('POST', isSignup ? '/auth/register' : '/auth/login', data);
         state.user = user;
+        await refreshBilling();
         if (location.hash !== '#/') location.hash = '#/';
         else render();
       } catch (err) {
@@ -274,18 +429,92 @@
       type: 'button', role: 'tab', 'aria-selected': String(mode === key), onclick: () => renderAuth(key),
     }, label);
 
+    authLayout(
+      h('div', { class: 'tabs', role: 'tablist' }, tab('login', 'Log in'), tab('signup', 'Sign up')),
+      form,
+    );
+    form.querySelector('input').focus();
+  }
+
+  function authLayout(...cardContent) {
+    const p = state.plans;
     fill(app, h('section', { class: 'auth' },
       h('div', { class: 'auth-hero' },
         h('div', { class: 'brand', style: { marginBottom: '20px' } }, h('span', { class: 'brand-mark' }, '🎁'), 'Giftlist'),
         h('h1', null, 'Every gift idea, budget and bow — in one place.'),
         h('p', null, 'Add the people you buy for, set a budget for each, jot down ideas with links and prices, and track every gift from idea to wrapped.'),
         h('ul', { class: 'auth-steps' }, STATUSES.map((s) => h('li', null, pill(s.key)))),
+        p.enabled
+          ? h('p', { class: 'pricing-note' },
+            h('strong', null, 'Free'), ` for up to ${p.free_people_limit} people · `,
+            h('strong', null, `Premium ${p.price_label}`), ' for everyone on your list')
+          : null,
       ),
-      h('div', { class: 'card auth-card' },
-        h('div', { class: 'tabs', role: 'tablist' }, tab('login', 'Log in'), tab('signup', 'Sign up')),
-        form,
-      ),
+      h('div', { class: 'card auth-card' }, cardContent),
     ));
+  }
+
+  function renderForgot() {
+    const error = h('p', { class: 'form-error', role: 'alert' });
+    const submit = h('button', { class: 'btn', type: 'submit' }, 'Email me a reset link');
+    const form = h('form', { novalidate: true },
+      h('div', null, h('h2', null, 'Reset your password'), h('p', { class: 'muted' }, 'Enter your email and we’ll send you a link to choose a new password.')),
+      field('Email', h('input', { name: 'email', type: 'email', required: true, autocomplete: 'email' })),
+      error,
+      submit,
+      h('button', { class: 'link-button', type: 'button', onclick: () => renderAuth('login') }, '← Back to log in'),
+    );
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      error.textContent = '';
+      submit.disabled = true;
+      try {
+        await api('POST', '/auth/forgot', { email: form.email.value });
+        fill(form,
+          h('div', null, h('h2', null, 'Check your email'),
+            h('p', { class: 'muted' }, `If there’s an account for ${form.email.value}, we’ve sent a reset link. It works for one hour.`)),
+          h('button', { class: 'btn btn-ghost', type: 'button', onclick: () => renderAuth('login') }, 'Back to log in'),
+        );
+      } catch (err) {
+        error.textContent = err.message;
+        submit.disabled = false;
+      }
+    });
+    authLayout(form);
+    form.querySelector('input').focus();
+  }
+
+  function renderReset(token) {
+    const error = h('p', { class: 'form-error', role: 'alert' });
+    const submit = h('button', { class: 'btn', type: 'submit' }, 'Save new password');
+    const form = h('form', { novalidate: true },
+      h('div', null, h('h2', null, 'Choose a new password')),
+      field('New password', h('input', { name: 'password', type: 'password', required: true, minlength: 8, autocomplete: 'new-password', placeholder: 'At least 8 characters' })),
+      field('Confirm new password', h('input', { name: 'confirm', type: 'password', required: true, autocomplete: 'new-password' })),
+      error,
+      submit,
+    );
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      error.textContent = '';
+      if (form.password.value !== form.confirm.value) {
+        error.textContent = 'The passwords don’t match.';
+        return;
+      }
+      submit.disabled = true;
+      try {
+        const { user } = await api('POST', '/auth/reset', { token, password: form.password.value });
+        state.user = user;
+        toast('Password updated – you’re logged in');
+        await refreshBilling();
+        location.hash = '#/';
+      } catch (err) {
+        error.textContent = err.message;
+        submit.disabled = false;
+      }
+    });
+    drawTopbar();
+    authLayout(form);
     form.querySelector('input').focus();
   }
 
@@ -301,7 +530,12 @@
       wrapped: t.wrapped + p.n_wrapped,
     }), { budget: 0, spent: 0, chosen: 0, wrapped: 0 });
 
-    const addPerson = () => personForm(null, (person) => { location.hash = `#/people/${person.id}`; });
+    await refreshBilling();
+    const addPerson = () => (atFreeLimit()
+      ? showUpgrade()
+      : personForm(null, (person) => { location.hash = `#/people/${person.id}`; }));
+    const b = state.billing;
+    const freeLeft = b && b.enabled && !b.premium ? Math.max(b.free_people_limit - b.people_count, 0) : null;
 
     const stat = (label, value) => h('div', { class: 'card stat' }, h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, value));
 
@@ -320,7 +554,11 @@
             ? h('div', { class: 'status-counts' }, STATUSES.filter((s) => p[`n_${s.key}`]).map((s) => pill(s.key, `${p[`n_${s.key}`]} ${s.label}`)))
             : h('div', { class: 'person-sub' }, 'No ideas yet'),
         )),
-        h('button', { class: 'add-card', type: 'button', onclick: addPerson }, h('span', { class: 'plus' }, '+'), 'Add a person'),
+        h('button', { class: 'add-card', type: 'button', onclick: addPerson },
+          h('span', { class: 'plus' }, freeLeft === 0 ? '⭐' : '+'),
+          freeLeft === 0 ? 'Upgrade to add more people' : 'Add a person',
+          freeLeft ? h('span', { class: 'add-card-note' }, `${freeLeft} of ${b.free_people_limit} free places left`) : null,
+          freeLeft === 0 ? h('span', { class: 'add-card-note' }, `Premium is ${b.price_label}`) : null),
       )
       : h('div', { class: 'card empty' },
         h('div', { class: 'big' }, '🎄'),
@@ -567,6 +805,11 @@
     topbar.hidden = !state.user;
     if (!state.user) return;
     document.getElementById('account-name').textContent = state.user.email;
+    const b = state.billing;
+    const badge = document.getElementById('plan-badge');
+    if (!b || !b.enabled) fill(badge);
+    else if (b.premium) fill(badge, h('a', { class: 'plan-chip premium', href: '#/account' }, '⭐ Premium'));
+    else fill(badge, h('button', { class: 'btn btn-sm btn-upgrade', type: 'button', onclick: showUpgrade }, '⭐ Upgrade'));
     const select = document.getElementById('currency-select');
     fill(select, ...state.currencies.map((c) => h('option', { value: c, selected: c === state.user.currency }, c)));
   }
@@ -584,6 +827,7 @@
   document.getElementById('logout-btn').addEventListener('click', async () => {
     await api('POST', '/auth/logout').catch(() => {});
     state.user = null;
+    state.billing = null;
     location.hash = '#/';
     render();
   });
@@ -593,11 +837,16 @@
   });
 
   async function render() {
+    if (modal.open) modal.close();
     drawTopbar();
+    const [route, query = ''] = location.hash.slice(1).split('?');
+    const params = new URLSearchParams(query);
+    if (route === '/reset' && params.get('token')) return renderReset(params.get('token'));
     if (!state.user) return renderAuth();
-    const match = location.hash.match(/^#\/people\/(\d+)/);
+    const match = route.match(/^\/people\/(\d+)$/);
     try {
       if (match) await renderPerson(match[1]);
+      else if (route === '/account') await renderAccount(params);
       else await renderPeople();
     } catch (err) {
       if (state.user) {
@@ -609,12 +858,18 @@
   }
 
   window.addEventListener('hashchange', render);
+  // Coming Back from Stripe can restore this page from the browser cache with a dialog still open.
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) render();
+  });
 
   (async function boot() {
     try {
       const me = await api('GET', '/auth/me');
       state.user = me.user;
       state.currencies = me.currencies;
+      if (me.plans) state.plans = me.plans;
+      if (state.user) await refreshBilling();
     } catch {
       state.user = null;
     }
