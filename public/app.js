@@ -296,9 +296,10 @@
     const totals = people.reduce((t, p) => ({
       budget: t.budget + p.budget_cents,
       spent: t.spent + p.spent_cents,
-      gifts: t.gifts + p.gift_count,
+      // Ideas aren't committed to yet, so only gifts at Buy or later count.
+      chosen: t.chosen + p.gift_count - p.n_idea,
       wrapped: t.wrapped + p.n_wrapped,
-    }), { budget: 0, spent: 0, gifts: 0, wrapped: 0 });
+    }), { budget: 0, spent: 0, chosen: 0, wrapped: 0 });
 
     const addPerson = () => personForm(null, (person) => { location.hash = `#/people/${person.id}`; });
 
@@ -338,7 +339,7 @@
           stat('People', people.length),
           stat('Total budget', money(totals.budget)),
           stat('Spent', money(totals.spent)),
-          stat('Wrapped', `${totals.wrapped} / ${totals.gifts}`))
+          stat('Wrapped', `${totals.wrapped} / ${totals.chosen}`))
         : null,
       content,
     );
