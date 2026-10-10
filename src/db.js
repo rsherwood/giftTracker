@@ -67,6 +67,8 @@ const ADDED_COLUMNS = {
     subscription_status: "TEXT NOT NULL DEFAULT ''",
     subscription_period_end: 'INTEGER',
     subscription_cancel_at_period_end: 'INTEGER NOT NULL DEFAULT 0',
+    // Optional budget for everyone on the list, shared out between people.
+    overall_budget_cents: 'INTEGER',
   },
   gifts: {
     // Set when a gift is moved to "Past gifts" (Premium), with the occasion it was for.

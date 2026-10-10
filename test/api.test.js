@@ -213,3 +213,39 @@ test('refuses to fetch images from private addresses', async () => {
   await assert.rejects(images.fetchProductImage('http://localhost:1/'));
   await assert.rejects(images.fetchProductImage('file:///etc/passwd'));
 });
+
+test('overall budget can be set and shared out between people in one go', async () => {
+  const call = await signedIn();
+  const mum = (await call('POST', '/api/people', { name: 'Mum', budget: 20 })).data.person;
+  const dad = (await call('POST', '/api/people', { name: 'Dad' })).data.person;
+  assert.equal((await call('GET', '/api/people')).data.overall_budget_cents, null);
+
+  let res = await call('PUT', '/api/budget', {
+    overall: '300',
+    budgets: [{ id: mum.id, budget: '175.50' }, { id: dad.id, budget: 124.5 }],
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.overall_budget_cents, 30000);
+  const byName = Object.fromEntries(res.data.people.map((p) => [p.name, p.budget_cents]));
+  assert.deepEqual(byName, { Mum: 17550, Dad: 12450 });
+
+  // Only the overall budget; people unchanged.
+  res = await call('PUT', '/api/budget', { overall: 250 });
+  assert.equal(res.data.overall_budget_cents, 25000);
+  assert.equal(res.data.people.find((p) => p.name === 'Mum').budget_cents, 17550);
+
+  // Clearing it.
+  res = await call('PUT', '/api/budget', { overall: '' });
+  assert.equal(res.data.overall_budget_cents, null);
+
+  // A bad value changes nothing.
+  res = await call('PUT', '/api/budget', { overall: 100, budgets: [{ id: mum.id, budget: 10 }, { id: dad.id, budget: -5 }] });
+  assert.equal(res.status, 400);
+  const after = (await call('GET', '/api/people')).data;
+  assert.equal(after.overall_budget_cents, null);
+  assert.equal(after.people.find((p) => p.name === 'Mum').budget_cents, 17550);
+
+  // Someone else's person can't be touched.
+  const other = await signedIn();
+  assert.equal((await other('PUT', '/api/budget', { budgets: [{ id: mum.id, budget: 1 }] })).status, 404);
+});

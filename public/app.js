@@ -801,7 +801,7 @@
 
   async function renderPeople() {
     fill(app, h('div', { class: 'loading-page' }, 'Loading…'));
-    const { people } = await api('GET', '/people');
+    const { people, overall_budget_cents: overall } = await api('GET', '/people');
 
     const totals = giftTotals(people);
 
@@ -859,15 +859,125 @@
       people.length
         ? h('div', { class: 'stats stats-6' },
           stat('People', people.length),
-          stat('Total budget', money(totals.budget)),
+          overall != null ? stat('Overall budget', money(overall)) : stat('Total budget', money(totals.budget)),
           stat('Spent', money(totals.spent)),
           progress('Purchased', totals.purchased),
           progress('Received', totals.received),
           progress('Wrapped', totals.wrapped))
         : null,
+      people.length ? overallBudgetPanel(overall, people, totals) : null,
       content,
     );
     celebrateIfAllWrapped(totals, people);
+  }
+
+  // ------------------------------------------------------------------------
+  // Overall budget, shared out between people
+  // ------------------------------------------------------------------------
+
+  const toCents = (value) => {
+    const n = Number(String(value ?? '').replace(/[,\s]/g, '').replace(/^[^\d.-]+/, ''));
+    return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : 0;
+  };
+
+  function overallBudgetPanel(overall, people, totals) {
+    const allocate = () => openAllocation(overall, people);
+    if (overall == null) {
+      return h('section', { class: 'card overall-panel empty-overall' },
+        h('div', null,
+          h('h2', null, '💷 Overall budget'),
+          h('p', null, 'Set one budget for everyone, then share it out between the people on your list.')),
+        h('button', { class: 'btn btn-ghost', type: 'button', onclick: allocate }, 'Set overall budget'));
+    }
+    const allocated = totals.budget;
+    const left = overall - allocated;
+    const scale = Math.max(overall, allocated, 1);
+    return h('section', { class: `card overall-panel${left < 0 ? ' over' : ''}` },
+      h('div', { class: 'overall-head' },
+        h('div', null,
+          h('h2', null, `💷 Overall budget: ${money(overall)}`),
+          h('p', null,
+            h('strong', null, money(allocated)), ' allocated · ',
+            left >= 0
+              ? [h('strong', null, money(left)), ' left to allocate']
+              : h('span', { class: 'over-text' }, `${money(-left)} more than your overall budget`),
+            ' · ', h('strong', null, money(totals.spent)), ' spent so far')),
+        h('button', { class: 'btn', type: 'button', onclick: allocate }, 'Allocate budget')),
+      h('div', { class: 'allocation-bar', role: 'img', 'aria-label': `${money(allocated)} of ${money(overall)} allocated` },
+        people.filter((p) => p.budget_cents > 0).map((p) => h('span', {
+          title: `${p.name}: ${money(p.budget_cents)}`,
+          style: { width: `${(p.budget_cents / scale) * 100}%`, background: avatarColor(p.name) },
+        }))),
+    );
+  }
+
+  function openAllocation(overall, people) {
+    const overallInput = h('input', {
+      name: 'overall', inputmode: 'decimal', placeholder: 'e.g. 500', value: overall != null ? centsToInput(overall) : '',
+    });
+    const rows = people.map((p) => ({
+      person: p,
+      input: h('input', {
+        inputmode: 'decimal', placeholder: '0', value: centsToInput(p.budget_cents), disabled: p.locked,
+        'aria-label': `Budget for ${p.name}`,
+      }),
+    }));
+    const summary = h('p', { class: 'allocation-summary', role: 'status' });
+    const update = () => {
+      const total = toCents(overallInput.value);
+      const allocated = rows.reduce((sum, r) => sum + toCents(r.input.value), 0);
+      summary.classList.toggle('over', Boolean(total) && allocated > total);
+      if (!total) {
+        fill(summary, 'Allocated ', h('strong', null, money(allocated)), '. Set an overall budget above to see what’s left.');
+      } else if (allocated <= total) {
+        fill(summary, 'Allocated ', h('strong', null, money(allocated)), ` of ${money(total)} · `, h('strong', null, money(total - allocated)), ' left');
+      } else {
+        fill(summary, 'Allocated ', h('strong', null, money(allocated)), ` – that’s ${money(allocated - total)} more than ${money(total)}`);
+      }
+    };
+    // Shares what's left (after anyone read-only) equally, in whole pounds/dollars where possible.
+    const splitEvenly = () => {
+      const total = toCents(overallInput.value);
+      const editable = rows.filter((r) => !r.person.locked);
+      if (!total || !editable.length) {
+        toast('Enter an overall budget first');
+        overallInput.focus();
+        return;
+      }
+      const fixed = rows.filter((r) => r.person.locked).reduce((sum, r) => sum + toCents(r.input.value), 0);
+      const available = Math.max(total - fixed, 0);
+      const wholeUnits = Math.floor(available / 100);
+      const base = Math.floor(wholeUnits / editable.length);
+      const extra = wholeUnits % editable.length;
+      editable.forEach((r, i) => { r.input.value = String(base + (i < extra ? 1 : 0)); });
+      update();
+    };
+    overallInput.addEventListener('input', update);
+    rows.forEach((r) => r.input.addEventListener('input', update));
+    update();
+
+    openModal('💷 Allocate your budget', [
+      field(`Overall budget (${state.user.currency})`, overallInput),
+      h('div', { class: 'allocation-list' },
+        rows.map((r) => h('label', { class: 'allocation-row' },
+          avatar(r.person.name),
+          h('span', { class: 'allocation-name' },
+            h('span', null, r.person.name, r.person.locked ? ' 🔒' : ''),
+            r.person.spent_cents ? h('span', { class: 'person-sub' }, `${money(r.person.spent_cents)} spent`) : null),
+          r.input))),
+      summary,
+      h('button', { class: 'btn btn-ghost btn-sm split-btn', type: 'button', onclick: splitEvenly }, '⚖️ Split evenly'),
+    ], {
+      submitLabel: 'Save budgets',
+      onSubmit: async () => {
+        await api('PUT', '/budget', {
+          overall: overallInput.value.trim(),
+          budgets: rows.filter((r) => !r.person.locked).map((r) => ({ id: r.person.id, budget: r.input.value.trim() })),
+        });
+        toast('Budgets saved');
+        render();
+      },
+    });
   }
 
   async function renderPerson(personId) {

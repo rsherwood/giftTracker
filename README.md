@@ -12,6 +12,9 @@ and price) per person. Each gift is tracked through:
   scrypt, and sessions use an HttpOnly cookie. Each user only sees their own data.
 - **People & budgets**: each person gets a budget bar showing what's been spent
   (Purchased, Received or Wrapped), what's planned (Buy), and what's left or over.
+- **Overall budget**: set one budget for everyone, then share it out between
+  people on the Allocate screen (with live totals and a "Split evenly" button).
+  The home page shows how much is allocated, left and spent.
 - **Gift ideas**: name, optional link, price. Filter by status, move forward with
   one click, or jump to any step with the status stepper.
 - **Automatic images**: every gift gets a picture when it's added.

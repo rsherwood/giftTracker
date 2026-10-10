@@ -144,6 +144,9 @@ function createApp(db, options = {}) {
     person: db.prepare('SELECT id, name, budget_cents, notes, created_at FROM people WHERE id = ? AND user_id = ?'),
     insertPerson: db.prepare('INSERT INTO people (user_id, name, budget_cents, notes) VALUES (?, ?, ?, ?)'),
     updatePerson: db.prepare('UPDATE people SET name = ?, budget_cents = ?, notes = ? WHERE id = ?'),
+    setPersonBudget: db.prepare('UPDATE people SET budget_cents = ? WHERE id = ? AND user_id = ?'),
+    overallBudget: db.prepare('SELECT overall_budget_cents FROM users WHERE id = ?'),
+    setOverallBudget: db.prepare('UPDATE users SET overall_budget_cents = ? WHERE id = ?'),
     deletePerson: db.prepare('DELETE FROM people WHERE id = ?'),
 
     giftsForPerson: db.prepare(`
@@ -495,7 +498,47 @@ function createApp(db, options = {}) {
 
   api.get('/people', (req, res) => {
     const locked = billing.lockedPeople(req.user.id);
-    res.json({ people: q.people.all(req.user.id).map((p) => ({ ...p, locked: locked.has(p.id) })) });
+    res.json({
+      people: q.people.all(req.user.id).map((p) => ({ ...p, locked: locked.has(p.id) })),
+      overall_budget_cents: q.overallBudget.get(req.user.id).overall_budget_cents,
+    });
+  });
+
+  // Sets the overall budget and/or shares it out between people, all at once.
+  // Body: { overall: "500" | "" (clear) , budgets: [{ id, budget }] }
+  api.put('/budget', (req, res) => {
+    const body = req.body || {};
+    const changes = Array.isArray(body.budgets) ? body.budgets : [];
+    if (changes.length > 500) throw new HttpError(400, 'Too many people in one go.');
+    const owned = new Map(q.people.all(req.user.id).map((p) => [p.id, p]));
+    const locked = billing.lockedPeople(req.user.id);
+    const updates = changes.map((c) => {
+      const person = owned.get(Number(c && c.id));
+      if (!person) throw new HttpError(404, 'Person not found.');
+      const cents = money(c.budget, `${person.name}’s budget`);
+      if (cents !== person.budget_cents && locked.has(person.id)) {
+        throw new HttpError(402, `${person.name} is read-only until you upgrade again.`, 'upgrade_required');
+      }
+      return [cents, person.id];
+    });
+    const overall = has(body, 'overall')
+      ? (body.overall === '' || body.overall === null ? null : money(body.overall, 'Overall budget'))
+      : undefined;
+
+    db.exec('BEGIN');
+    try {
+      if (overall !== undefined) q.setOverallBudget.run(overall, req.user.id);
+      for (const [cents, personId] of updates) q.setPersonBudget.run(cents, personId, req.user.id);
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+    const locks = billing.lockedPeople(req.user.id);
+    res.json({
+      people: q.people.all(req.user.id).map((p) => ({ ...p, locked: locks.has(p.id) })),
+      overall_budget_cents: q.overallBudget.get(req.user.id).overall_budget_cents,
+    });
   });
 
   api.post('/people', (req, res) => {
