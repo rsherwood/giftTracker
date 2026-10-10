@@ -259,6 +259,107 @@
   }
 
   // ------------------------------------------------------------------------
+  // Progress & celebrations
+  // ------------------------------------------------------------------------
+
+  function giftTotals(people) {
+    return people.reduce((t, p) => ({
+      budget: t.budget + p.budget_cents,
+      spent: t.spent + p.spent_cents,
+      // Ideas aren't committed to yet, so only gifts at Buy or later count.
+      chosen: t.chosen + p.gift_count - p.n_idea,
+      // Each count includes gifts that have gone further, e.g. wrapped gifts were also purchased.
+      purchased: t.purchased + p.n_purchased + p.n_received + p.n_wrapped,
+      received: t.received + p.n_received + p.n_wrapped,
+      wrapped: t.wrapped + p.n_wrapped,
+      archived: t.archived + (p.archived_count || 0),
+    }), { budget: 0, spent: 0, chosen: 0, purchased: 0, received: 0, wrapped: 0, archived: 0 });
+  }
+
+  // Confetti once per achievement: the same finished list doesn't celebrate on
+  // every visit, but wrapping newly added gifts (or a new year's) does.
+  function celebrateIfAllWrapped(totals) {
+    if (!totals.chosen || totals.wrapped !== totals.chosen || !state.user) return;
+    const key = `giftlist.celebrated.${state.user.id}`;
+    const signature = `${totals.chosen}|${totals.archived}`;
+    try {
+      if (localStorage.getItem(key) === signature) return;
+      localStorage.setItem(key, signature);
+    } catch {
+      /* no storage: celebrate anyway */
+    }
+    toast('🎉 Everything’s wrapped – you’re all set!');
+    confetti();
+  }
+
+  function confetti() {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const canvas = h('canvas', { class: 'confetti', 'aria-hidden': 'true' });
+    document.body.append(canvas);
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const resize = () => {
+      canvas.width = innerWidth * dpr;
+      canvas.height = innerHeight * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    const colours = ['#e0485f', '#f6b73c', '#1f9d6b', '#2f7bd8', '#8a4fd6', '#ff8fa3', '#ffffff'];
+    const pieces = Array.from({ length: Math.min(260, Math.round(innerWidth / 4)) }, (_, i) => {
+      // Two bursts from the bottom corners, plus a gentle shower from the top.
+      const burst = i % 3;
+      const fromLeft = burst === 0;
+      const shower = burst === 2;
+      return {
+        x: shower ? Math.random() * innerWidth : fromLeft ? 0 : innerWidth,
+        y: shower ? -20 - Math.random() * innerHeight * 0.5 : innerHeight,
+        vx: shower ? (Math.random() - 0.5) * 2 : (fromLeft ? 1 : -1) * (4 + Math.random() * 7),
+        vy: shower ? 1 + Math.random() * 2 : -(11 + Math.random() * 9),
+        size: 6 + Math.random() * 6,
+        rot: Math.random() * Math.PI,
+        spin: (Math.random() - 0.5) * 0.3,
+        colour: colours[i % colours.length],
+        round: Math.random() < 0.3,
+      };
+    });
+
+    const start = performance.now();
+    const duration = 4500;
+    (function frame(now) {
+      const elapsed = now - start;
+      ctx.clearRect(0, 0, innerWidth, innerHeight);
+      ctx.globalAlpha = elapsed > duration - 1000 ? Math.max(0, (duration - elapsed) / 1000) : 1;
+      for (const p of pieces) {
+        p.vy += 0.25; // gravity
+        p.vx *= 0.99; // air
+        p.x += p.vx;
+        p.y += p.vy;
+        p.rot += p.spin;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.colour;
+        if (p.round) {
+          ctx.beginPath();
+          ctx.arc(0, 0, p.size / 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+        }
+        ctx.restore();
+      }
+      if (elapsed < duration) {
+        requestAnimationFrame(frame);
+      } else {
+        window.removeEventListener('resize', resize);
+        canvas.remove();
+      }
+    })(start);
+  }
+
+  // ------------------------------------------------------------------------
   // Plans & billing
   // ------------------------------------------------------------------------
 
@@ -702,16 +803,7 @@
     fill(app, h('div', { class: 'loading-page' }, 'Loading…'));
     const { people } = await api('GET', '/people');
 
-    const totals = people.reduce((t, p) => ({
-      budget: t.budget + p.budget_cents,
-      spent: t.spent + p.spent_cents,
-      // Ideas aren't committed to yet, so only gifts at Buy or later count.
-      chosen: t.chosen + p.gift_count - p.n_idea,
-      // Each count includes gifts that have gone further, e.g. wrapped gifts were also purchased.
-      purchased: t.purchased + p.n_purchased + p.n_received + p.n_wrapped,
-      received: t.received + p.n_received + p.n_wrapped,
-      wrapped: t.wrapped + p.n_wrapped,
-    }), { budget: 0, spent: 0, chosen: 0, purchased: 0, received: 0, wrapped: 0 });
+    const totals = giftTotals(people);
 
     await refreshBilling();
     const addPerson = () => (atFreeLimit()
@@ -721,6 +813,14 @@
     const freeLeft = b && b.enabled && !b.premium ? Math.max(b.free_people_limit - b.people_count, 0) : null;
 
     const stat = (label, value) => h('div', { class: 'card stat' }, h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, value));
+    // "x / total" figures turn green with a firework once every gift has reached that stage.
+    const progress = (label, done) => {
+      const complete = totals.chosen > 0 && done === totals.chosen;
+      return h('div', { class: `card stat${complete ? ' complete' : ''}` },
+        h('div', { class: 'stat-label' }, label),
+        h('div', { class: 'stat-value' }, `${done} / ${totals.chosen}`,
+          complete ? h('span', { class: 'firework', role: 'img', 'aria-label': 'All done' }, ' 🎆') : null));
+    };
 
     const content = people.length
       ? h('div', { class: 'grid' },
@@ -761,12 +861,13 @@
           stat('People', people.length),
           stat('Total budget', money(totals.budget)),
           stat('Spent', money(totals.spent)),
-          stat('Purchased', `${totals.purchased} / ${totals.chosen}`),
-          stat('Received', `${totals.received} / ${totals.chosen}`),
-          stat('Wrapped', `${totals.wrapped} / ${totals.chosen}`))
+          progress('Purchased', totals.purchased),
+          progress('Received', totals.received),
+          progress('Wrapped', totals.wrapped))
         : null,
       content,
     );
+    celebrateIfAllWrapped(totals, people);
   }
 
   async function renderPerson(personId) {
@@ -889,6 +990,10 @@
         const { gift: updated } = await api('PATCH', `/gifts/${gift.id}`, { status });
         replaceGift(updated);
         toast(`${updated.name} → ${STATUS[status].label}`);
+        // Wrapping the last gift on everyone's list deserves a party.
+        if (status === 'wrapped' && gifts.every((g) => g.status === 'wrapped' || g.status === 'idea')) {
+          api('GET', '/people').then(({ people }) => celebrateIfAllWrapped(giftTotals(people), people)).catch(() => {});
+        }
       } catch (err) {
         toast(err.message);
       }
